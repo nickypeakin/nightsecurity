@@ -1,0 +1,23 @@
+{
+  "name": "night-security",
+  "version": "1.0.0",
+  "description": "A co-op 3D horror game in the browser. You and your friends work the night shift at Kingsgate Mall: lock every gate, punch every clock, watch the cameras, and find out what happened to the last guard. The mannequins only move when nobody is looking.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "node scripts/build.js && node scripts/serve.js",
+    "test": "node test/sim.test.js && node test/walk.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fontsource/inter": "5.1.0",
+    "@fontsource/special-elite": "5.1.0",
+    "@fontsource/vt323": "5.3.0",
+    "peerjs": "1.5.5",
+    "three": "0.170.0"
+  }
+}
