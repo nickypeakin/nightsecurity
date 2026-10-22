@@ -29,6 +29,9 @@ try {
 }
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+// the only shadow is your flashlight's: redrawn only while it's on (the game
+// asks for it each frame)
+renderer.shadowMap.autoUpdate = false;
 renderer.toneMapping = THREE.NoToneMapping;
 const post = new Post(renderer);
 const input = new Input(canvas);
@@ -97,24 +100,42 @@ let solo = false;
 let backTo = 'title';
 let paused = false;
 
-// Graphics: 'auto' draws at the screen's full resolution and only gives a
-// little of it up on computers that can't keep up, 'high' keeps it all,
-// 'low' is for older laptops (smaller picture, no shadows, no glow).
+// Graphics: 'auto' starts at the screen's own resolution and steps down a
+// ladder while frames take too long (a little resolution, a smaller shadow
+// map, no glow or anti-aliasing, less resolution again), climbing back when
+// there's headroom. 'high' keeps everything, including the extra pixels of
+// high-density screens; 'low' starts at the bottom (and has no shadows).
 // `?scale=0.5` fixes the resolution (used by tests).
+const LADDER = [
+  { scale: 1, samples: 2, bloom: true, shadow: 1024 },
+  { scale: 0.85, samples: 2, bloom: true, shadow: 1024 },
+  { scale: 0.75, samples: 2, bloom: true, shadow: 512 },
+  { scale: 0.75, samples: 0, bloom: false, shadow: 512 },
+  { scale: 0.62, samples: 0, bloom: false, shadow: 512 },
+  { scale: 0.5, samples: 0, bloom: false, shadow: 512 },
+];
 const PRESETS = {
-  auto: { start: 1, min: 0.7, max: 1, maxDpr: 1.5, samples: 2, bloom: true, shadows: true },
-  high: { start: 1, min: 1, max: 1, maxDpr: 2, samples: 4, bloom: true, shadows: true },
-  low: { start: 0.7, min: 0.5, max: 0.85, maxDpr: 1, samples: 0, bloom: false, shadows: false },
+  auto: { maxDpr: 1, top: 0, bottom: LADDER.length - 1, shadows: true },
+  high: { maxDpr: 2, top: 0, bottom: 0, shadows: true, fixed: { samples: 4 } },
+  low: { maxDpr: 1, top: LADDER.length - 2, bottom: LADDER.length - 1, shadows: false },
 };
 const fixedScale = Number(params.get('scale')) || 0;
 let preset = PRESETS[settings.graphics] || PRESETS.auto;
-let quality = fixedScale || preset.start;
-let frameAvg = 1 / 60, judgeT = 0, calmT = 0;
+let level = preset.top;
+let quality = 1;
+let frameAvg = 1 / 60, judgeT = 0, calmT = 0, upWait = 6, sinceUp = 99;
+
+function setLevel(i) {
+  level = i;
+  const L = { ...LADDER[i], ...(preset.fixed || {}) };
+  post.configure({ maxDpr: preset.maxDpr, samples: L.samples, bloom: L.bloom });
+  world.shadowSize(L.shadow);
+  quality = fixedScale || L.scale;
+  post.setSize(innerWidth, innerHeight, quality);
+}
 
 function applyGraphics() {
   preset = PRESETS[settings.graphics] || PRESETS.auto;
-  quality = fixedScale || preset.start;
-  post.configure(preset);
   if (renderer.shadowMap.enabled !== preset.shadows) {
     renderer.shadowMap.enabled = preset.shadows;
     // every material has to be rebuilt with (or without) shadows
@@ -124,24 +145,35 @@ function applyGraphics() {
   }
   frameAvg = 1 / 60;
   calmT = 0;
+  upWait = 6;
+  setLevel(preset.top);
   resize();
 }
 
-// If frames take too long the picture renders at a lower resolution, and
-// climbs back once there's headroom.
+// If frames take too long, a step down the ladder; a step back up once
+// they've been quick for a while (and a longer while each time a step up
+// proves too much).
+let longRun = 0;
 function adaptQuality(dt) {
-  if (fixedScale) return;
+  if (fixedScale || preset.top === preset.bottom) return;
+  // a lone long frame (a shader compiling, coming back to the tab) says
+  // nothing about the computer; one after another does
+  if (dt > 0.4) { if (++longRun < 3) return; dt = 0.4; } else longRun = 0;
   frameAvg += (dt - frameAvg) * 0.08;
   judgeT += dt;
   calmT += dt;
-  if (judgeT < 1.2) return;
+  sinceUp += dt;
+  if (judgeT < 1) return;
   judgeT = 0;
-  let next = quality;
-  if (frameAvg > 1 / 48 && quality > preset.min) { next = Math.max(preset.min, quality - (frameAvg > 1 / 30 ? 0.2 : 0.1)); calmT = 0; }
-  else if (frameAvg < 1 / 58 && quality < preset.max && calmT > 6) { next = Math.min(preset.max, quality + 0.05); calmT = 0; }
-  if (next !== quality) {
-    quality = next;
-    post.setSize(innerWidth, innerHeight, quality);
+  if (frameAvg > 1 / 45 && level < preset.bottom) {
+    if (sinceUp < 5) upWait = Math.min(60, upWait * 2);
+    setLevel(Math.min(preset.bottom, level + (frameAvg > 1 / 28 ? 2 : 1)));
+    frameAvg = 1 / 50;
+    calmT = 0;
+  } else if (frameAvg < 1 / 57 && level > preset.top && calmT > upWait) {
+    setLevel(level - 1);
+    calmT = 0;
+    sinceUp = 0;
   }
 }
 
@@ -152,8 +184,8 @@ function resize() {
   if (game) game.resize(w, h);
 }
 addEventListener('resize', resize);
-post.configure(preset);
 renderer.shadowMap.enabled = preset.shadows;
+setLevel(preset.top);
 resize();
 
 // Compile every shader the game will need now, while the title is up, so
@@ -388,9 +420,9 @@ canvas.addEventListener('click', () => { if (game && !input.locked) actions.resu
 let last = performance.now();
 const titleFx = { fade: 0, bars: 0, exposure: 1.0 };
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const raw = (now - last) / 1000, dt = Math.min(0.1, raw);
   last = now;
-  adaptQuality(dt);
+  adaptQuality(raw);
   if (game) {
     if (!paused) game.update(dt);
     game.render();

@@ -71,10 +71,14 @@ export class Game {
     this.creakT = new Map();
     this.solids = new Solids(staticSolids());
     this.tmp = new THREE.Vector3();
+    this.tmp2 = new THREE.Vector3();
     this.flicker = new Map();
     this.flickerT = 0;
 
     const W = world;
+    // a flashlight per guard: build the shaders for that now, not on the
+    // first frame someone switches one on
+    if (W.useFlashlights(this.roster.length)) renderer.compile(W.scene, this.camera);
     W.setBreakers({ concourse: true, court: true, food: true, stores: false, back: true, cams: true }, false, { force: true });
     W.setFlags(0);
     this.avatars = new Map();
@@ -373,8 +377,11 @@ export class Game {
     for (const a of this.avatars.values()) a.update(dt);
     const me = this.camera.position;
     if (this.stalker) this.stalker.update(dt, this.t, me);
-    this.dale.root.visible = true;
-    this.dale.update(dt, this.t, this.daleMode === 'trapped' ? null : me);
+    // Dale, shut away somewhere, is only drawn (and posed) when you're near
+    const view = this.mode === 'cctv' ? this.cctv.cams[this.camIdx].position : me;
+    const daleNear = this.daleMode !== 'trapped' || this.dale.fresh || Math.hypot(view.x - this.dale.x, view.z - this.dale.z) < 18;
+    this.dale.root.visible = daleNear;
+    if (daleNear) this.dale.update(dt, this.t, this.daleMode === 'trapped' ? null : me);
     if (this.manager) this.manager.update(dt, this.t, me);
     this.stepSounds(dt);
 
@@ -863,7 +870,7 @@ export class Game {
     W.scene.add(face);
     face.visible = false;
     const pos = [-36.5, 1.5, -1.0], look = [-41, 1.3, -4.6];
-    const flash = W.flashlights[1];
+    const flash = W.hisLight;
     const kf = { i: flash.intensity, p: flash.position.clone(), t: flash.target.position.clone(), a: flash.angle };
     const shots = [
       { stamp: "'96 10 15", arrange: () => {} },
@@ -998,10 +1005,11 @@ export class Game {
       this.flicker = fl;
     }
     W.update(dt, this.t, { flashes, his, camera: this.camera });
-    // the monitors, if you're near enough to see them
+    // the monitors, if you're in the office and facing them
     const c = this.camera.position;
-    this.cctv.update(this.renderer, this.mode !== 'cctv' && Math.hypot(c.x, c.z + 25) < 10, this.breakers.cams);
     const room = roomAt(c.x, c.z);
+    const facing = room && room.id === 'security' && this.camera.getWorldDirection(this.tmp).dot(this.tmp2.set(-c.x, 0, -26.6 - c.z).normalize()) > 0.2;
+    this.cctv.update(this.renderer, dt, this.mode !== 'cctv' && facing, this.breakers.cams);
     const lit = lightAt(c.x, 1.5, c.z, { breakers: this.breakers, carousel: (this.flags & 2) !== 0 });
     sound.setEnv({ lit, room: room ? (room.group === 1 ? 'big' : ['women', 'men', 'restHall'].includes(room.id) ? 'restroom' : 'back') : 'big', outdoor: room && (room.id === 'southVest' || room.id === 'eastVest') ? 1 : 0 });
     sound.update(dt);
@@ -1097,6 +1105,8 @@ export class Game {
   render() {
     const fx = this.fx;
     fx.time = this.t;
+    // the flashlight's shadows only need redrawing while it's on
+    this.renderer.shadowMap.needsUpdate = this.world.flashlights[0].intensity > 0;
     if (this.mode === 'cctv') {
       const cam = this.cctv.cams[this.camIdx];
       cam.aspect = this.camera.aspect;

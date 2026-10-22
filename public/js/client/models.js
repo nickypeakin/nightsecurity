@@ -5,6 +5,7 @@
 // Everything faces +z with its origin on the floor; `rot` turns it.
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { mat, cachedGeo, place, block, box, cyl, ball, beam, lathe, wood, cloth, METAL, STEEL, BLACK, glowMat } from './props.js';
 
@@ -24,6 +25,29 @@ function plane(g, material, w, h, x, y, z, ry = 0) {
   return p;
 }
 const keep = (o) => { o.userData.keep = true; return o; };
+
+// a group's own meshes (not its subgroups) merged by material, in the
+// group's own space: for the parts that move as one (each a draw call less)
+function compact(group) {
+  const by = new Map();
+  for (const o of [...group.children]) {
+    if (!o.isMesh) continue;
+    o.updateMatrix();
+    const geo = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix);
+    for (const n of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(n)) geo.deleteAttribute(n);
+    if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+    if (!by.has(o.material)) by.set(o.material, []);
+    by.get(o.material).push(geo);
+    group.remove(o);
+  }
+  for (const [m, list] of by) {
+    const mesh = new THREE.Mesh(mergeGeometries(list), m);
+    mesh.castShadow = mesh.receiveShadow = true;
+    group.add(mesh);
+    for (const g of list) g.dispose();
+  }
+  return group;
+}
 
 // ------------------------------------------------------------- the props
 const build = {
@@ -164,15 +188,15 @@ const build = {
     // the canopy
     place(spin, cachedGeo('carCanopy', () => new THREE.ConeGeometry(4.1, 1.2, 24, 1, true)), red, 0, 4.4, 0);
     place(spin, cachedGeo('carRim', () => new THREE.CylinderGeometry(4.1, 4.1, 0.35, 24, 1, true)), cream, 0, 3.65, 0);
-    // bulbs round the rim
+    // bulbs round the rim, in three sets that take turns to chase
     const bulb = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.9, 1.1) });
     g.userData.bulbMat = bulb;
+    const sets = [[], [], []];
     for (let i = 0; i < 24; i++) {
       const a = (i / 24) * Math.PI * 2;
-      const b = new THREE.Mesh(cachedGeo('bulb', () => new THREE.SphereGeometry(0.05, 8, 6)), bulb);
-      b.position.set(Math.cos(a) * 4.12, 3.62, Math.sin(a) * 4.12);
-      spin.add(b);
+      sets[i % 3].push(new THREE.SphereGeometry(0.05, 8, 6).translate(Math.cos(a) * 4.12, 3.62, Math.sin(a) * 4.12));
     }
+    g.userData.bulbs = sets.map((list) => new THREE.Mesh(mergeGeometries(list), bulb));
     // horses on poles
     const horseM = [mat(0xf2ead8, { rough: 0.4 }), mat(0x3a2a1a, { rough: 0.4 }), mat(0xe8c890, { rough: 0.4 })];
     for (let i = 0; i < 8; i++) {
@@ -193,7 +217,10 @@ const build = {
         l.rotation.x = rx;
       }
       block(horse, red, 0, 0.29, 0, 0.3, 0.05, 0.3, 0.01);
+      compact(horse);
     }
+    compact(spin);
+    spin.add(...g.userData.bulbs);
   },
   table(g, p) {
     if (p.books) {
@@ -312,14 +339,16 @@ const build = {
   },
   tvWall(g, p) {
     block(g, mat(0x2a2a2a, { rough: 0.6 }), 0, p.h / 2, -0.1, p.w, p.h, 0.2, 0.01);
-    g.userData.screens = [];
-    const cols = 6, rows = 3;
+    // every screen shows the same thing: one mesh for all eighteen
+    const cols = 6, rows = 3, faces = [];
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const x = -p.w / 2 + (c + 0.5) * p.w / cols, y = 0.5 + r * 0.72;
       block(g, mat(0x1a1a1c, { rough: 0.4 }), x, y + 0.3, 0.15, p.w / cols - 0.1, 0.62, 0.45, 0.04);
-      const s = plane(g, new THREE.MeshBasicMaterial({ color: 0x0a0c0e }), p.w / cols - 0.24, 0.46, x, y + 0.32, 0.38);
-      g.userData.screens.push(keep(s));
+      faces.push(new THREE.PlaneGeometry(p.w / cols - 0.24, 0.46).translate(x, y + 0.32, 0.38));
     }
+    const s = new THREE.Mesh(mergeGeometries(faces), new THREE.MeshBasicMaterial({ color: 0x0a0c0e }));
+    g.add(s);
+    g.userData.screens = [keep(s)];
   },
   rack(g, p) {
     const m = METAL();

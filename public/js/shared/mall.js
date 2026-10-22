@@ -832,11 +832,11 @@ export class NavGrid {
     };
     D[g] = 0;
     push(g, 0);
-    const ok = (i) => {
-      if (!this.walk[i]) return false;
-      const dk = this.doorAt[i];
-      return dk < 0 || pass(dk);
-    };
+    // which doors this walker gets through, asked once rather than per square
+    const through = this.through || (this.through = new Uint8Array(DOORS.length));
+    for (let k = 0; k < DOORS.length; k++) through[k] = pass(k) ? 1 : 0;
+    const walk = this.walk, doorAt = this.doorAt;
+    const ok = (i) => walk[i] === 1 && (doorAt[i] < 0 || through[doorAt[i]] === 1);
     while (size > 0) {
       const d0 = HD[0];
       const i = pop();

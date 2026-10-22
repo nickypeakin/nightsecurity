@@ -16,11 +16,17 @@ export function turn(from, to, rate) {
   return from + Math.max(-rate, Math.min(rate, d));
 }
 
-// Fields cached by goal square and door rules, rebuilt every `ttl` seconds.
+// Fields cached by goal and door rules, rebuilt every `ttl` seconds. A
+// field is a few milliseconds' work, so a fresh one to somewhere within a
+// step or so of the goal does instead (whoever's chased keeps moving), and
+// once two have been built in a tick, anything recent to within a few
+// metres will do until the next.
 export class FieldCache {
   constructor(nav) {
     this.nav = nav;
     this.cache = new Map();
+    this.tickT = -1;
+    this.built = 0;
   }
 
   get(t, x, z, passKey, pass, ttl = 0.6) {
@@ -28,9 +34,19 @@ export class FieldCache {
     const key = `${passKey}:${i}`;
     const c = this.cache.get(key);
     if (c && t - c.t < ttl) return c.D;
+    if (t !== this.tickT) { this.tickT = t; this.built = 0; }
+    const busy = this.built >= 2;
+    let near = null, nd = Infinity;
+    for (const e of this.cache.values()) {
+      if (e.passKey !== passKey) continue;
+      const d = Math.hypot(e.x - x, e.z - z), age = t - e.t;
+      if ((d < 1.6 && age < ttl) || (busy && d < 5 && age < 4)) if (d < nd) { nd = d; near = e; }
+    }
+    if (near) return near.D;
+    this.built++;
     const D = c && c.D.length === this.nav.n ? c.D : new Float32Array(this.nav.n);
     D.set(this.nav.field(x, z, pass));
-    this.cache.set(key, { t, D });
+    this.cache.set(key, { t, D, x, z, passKey });
     // forget fields nobody's asked for in a while
     if (this.cache.size > 24) for (const [k, v] of this.cache) if (t - v.t > 5) this.cache.delete(k);
     return D;

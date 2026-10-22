@@ -844,8 +844,26 @@ function bake(group) {
   }
 }
 
-// A posed person as a handful of static meshes (one per material): for
-// the mannequins, which only change pose when nobody's looking.
+// A baked figure is drawn in as few pieces as possible: everything without
+// a picture on it shares one of a few plain materials, its colour carried
+// in the vertices (a dozen mannequins in a window were a hundred-odd draw
+// calls otherwise).
+const bakedMats = new Map();
+function bakedMat(m) {
+  if (m.map || m.alphaMap || m.transparent) return null;
+  if (m.emissive && m.emissive.r + m.emissive.g + m.emissive.b > 0.001) return null;
+  const r = m.roughness < 0.45 ? 0.3 : m.roughness < 0.75 ? 0.6 : 0.85, mt = m.metalness > 0.35 ? 0.6 : 0;
+  const k = `${r}:${mt}:${m.side}:${m.polygonOffset ? 1 : 0}`;
+  if (!bakedMats.has(k)) {
+    const b = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: r, metalness: mt, side: m.side });
+    if (m.polygonOffset) { b.polygonOffset = true; b.polygonOffsetFactor = -2; b.polygonOffsetUnits = -2; }
+    bakedMats.set(k, b);
+  }
+  return bakedMats.get(k);
+}
+
+// A posed person as a handful of static meshes: for the mannequins,
+// which only change pose when nobody's looking.
 export function bakePose(root, into = null) {
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
@@ -856,10 +874,24 @@ export function bakePose(root, into = null) {
     g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
     for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) g.deleteAttribute(name);
     if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-    if (!o.material.vertexColors && g.attributes.color) g.deleteAttribute('color');
-    if (o.material.vertexColors && !g.attributes.color) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3));
-    if (!byMat.has(o.material)) byMat.set(o.material, []);
-    byMat.get(o.material).push(g);
+    const shared = bakedMat(o.material);
+    if (shared) {
+      // the material's colour (times any colour already in the vertices)
+      const n = g.attributes.position.count, c = o.material.color, had = o.material.vertexColors && g.attributes.color;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = c.r * (had ? had.getX(i) : 1);
+        col[i * 3 + 1] = c.g * (had ? had.getY(i) : 1);
+        col[i * 3 + 2] = c.b * (had ? had.getZ(i) : 1);
+      }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    } else {
+      if (!o.material.vertexColors && g.attributes.color) g.deleteAttribute('color');
+      if (o.material.vertexColors && !g.attributes.color) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3));
+    }
+    const m = shared || o.material;
+    if (!byMat.has(m)) byMat.set(m, []);
+    byMat.get(m).push(g);
   });
   const out = into || new THREE.Group();
   for (const c of [...out.children]) { c.geometry.dispose(); out.remove(c); }

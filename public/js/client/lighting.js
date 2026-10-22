@@ -74,11 +74,13 @@ const FRAG_LIGHT = /* glsl */`
       vec2 luv = ( c + 0.5 ) / mallN;
       vec4 L = texture2D( mallLight, luv );
       if ( L.r + L.g + L.b < 0.0005 ) continue;
-      if ( abs( texture2D( mallInfo, luv ).r - myGroup ) > 0.5 ) continue;
+      // out of its reach (most of the corner squares): nothing to add
       vec3 lp = vec3( mallGrid.x + ( c.x + 0.5 ) * mallGrid.z, L.a, mallGrid.y + ( c.y + 0.5 ) * mallGrid.z );
       vec3 d = lp - vMallPos;
       float h = length( d.xz ) / ( mallGrid.z * 1.45 );
-      float win = clamp( 1.0 - h * h, 0.0, 1.0 );
+      if ( h >= 1.0 ) continue;
+      if ( abs( texture2D( mallInfo, luv ).r - myGroup ) > 0.5 ) continue;
+      float win = 1.0 - h * h;
       win *= win;
       vec3 col = L.rgb * mallScale * win / ( 1.0 + dot( d, d ) * mallFalloff );
       directLight.direction = normalize( ( viewMatrix * vec4( d, 0.0 ) ).xyz );
@@ -123,6 +125,10 @@ export function setLights(state, { flicker = null, dimmed = null, dawn = 0 } = {
     lightData[i + 1] = g * p;
     lightData[i + 2] = b * p;
     lightData[i + 3] = f.y;
+    // the bank of monitors glows blue on the security office desk
+    if (f.breaker === 'desk' && state.breakers && state.breakers.cams) {
+      lightData[i] += 0.42; lightData[i + 1] += 0.58; lightData[i + 2] += 0.75;
+    }
   }
   lightTex.needsUpdate = true;
 }

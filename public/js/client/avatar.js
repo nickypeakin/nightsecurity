@@ -246,17 +246,25 @@ export class MannequinsView {
   constructor(game) {
     this.game = game;
     // Each one is posed on a rig that's never drawn, then baked into a few
-    // static meshes; it's rebaked only when it moves (which is to say,
-    // only when nobody's looking).
+    // static meshes; it changes only when it moves (which is to say, only
+    // when nobody's looking). Each look in each pose is baked once and
+    // shared.
+    this.baked = new Map();
     this.list = MANNEQUIN_HOMES.map(([x, z, ry], i) => {
-      const rigRoot = makePerson(MANNEQUIN_LOOKS[i % MANNEQUIN_LOOKS.length]);
+      const look = MANNEQUIN_LOOKS[i % MANNEQUIN_LOOKS.length];
+      const rigRoot = makePerson(look);
       const root = new THREE.Group();
       root.scale.copy(rigRoot.scale);
       rigRoot.scale.setScalar(1);
       root.position.set(x, x < -40.2 ? 0.24 : 0, z);
       root.rotation.y = ry + Math.PI;
-      game.world.scene.add(root);
-      const m = { root, rigRoot, rig: rigRoot.userData.rig, pose: -1, x, z, ry, moving: false };
+      // drawn only within fifty metres of the camera (past thirty-odd you
+      // can't keep them still by looking anyway)
+      const wrap = new THREE.Group();
+      wrap.add(root);
+      game.world.scene.add(wrap);
+      game.world.addFar(wrap, { ref: root, far: 50, owner: this });
+      const m = { root, wrap, rigRoot, rig: rigRoot.userData.rig, look, pose: -1, x, z, ry, moving: false };
       this.pose(m, i % 3);
       return m;
     });
@@ -269,15 +277,29 @@ export class MannequinsView {
     this.uniform.rotation.y = UNIFORM_HOME[2] + Math.PI;
     for (let i = 0; i < 40; i++) u.userData.rig.update(0.05, { pose: 'stand', stiff: true, noBlink: true, lookYaw: 0.15 });
     bakePose(u, this.uniform);
-    game.world.scene.add(this.uniform);
+    this.uniformWrap = new THREE.Group();
+    this.uniformWrap.add(this.uniform);
+    game.world.scene.add(this.uniformWrap);
+    game.world.addFar(this.uniformWrap, { ref: this.uniform, far: 50, owner: this });
   }
 
   pose(m, i) {
     if (m.pose === i) return;
     m.pose = i;
-    const st = { ...POSES[i % POSES.length], speed: 0, stiff: true, noBlink: true };
-    for (let k = 0; k < 40; k++) m.rig.update(0.05, st);
-    bakePose(m.rigRoot, m.root);
+    const key = `${m.look}:${i % POSES.length}`;
+    let baked = this.baked.get(key);
+    if (!baked) {
+      const st = { ...POSES[i % POSES.length], speed: 0, stiff: true, noBlink: true };
+      for (let k = 0; k < 40; k++) m.rig.update(0.05, st);
+      baked = bakePose(m.rigRoot);
+      this.baked.set(key, baked);
+    }
+    m.root.clear();
+    for (const c of baked.children) {
+      const mesh = new THREE.Mesh(c.geometry, c.material);
+      mesh.castShadow = mesh.receiveShadow = true;
+      m.root.add(mesh);
+    }
   }
 
   // rows: [x, z, ry, pose, flags]
@@ -301,8 +323,10 @@ export class MannequinsView {
   }
 
   dispose() {
-    for (const m of this.list) m.root.removeFromParent();
-    this.uniform.removeFromParent();
+    for (const m of this.list) m.wrap.removeFromParent();
+    this.uniformWrap.removeFromParent();
+    this.game.world.dropFar(this);
+    for (const b of this.baked.values()) for (const c of b.children) c.geometry.dispose();
   }
 }
 

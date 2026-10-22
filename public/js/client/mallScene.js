@@ -2,13 +2,12 @@
 // shared/mall.js and reused by the title screen and every night.
 // Walls are turned into faces with the right material on each side and
 // world-metre texture coordinates; everything that never moves is merged
-// by material in 16 m chunks (few draw calls, and the flashlight's shadow
-// only redraws the chunks it can see). The gates, doors, the carousel,
+// by material in a few big chunks of the building (few draw calls, and
+// the flashlight's shadow only redraws the chunks it can see). The gates, doors, the carousel,
 // the TVs, the monitors and the alarm panel stay separate so they can move
 // and change.
 
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import * as M from './models.js';
@@ -17,18 +16,22 @@ import { setLights } from './lighting.js';
 import { STORES, STALLS, ROOMS, WALLS, PROPS, DOORS, STATIONS, CAMERAS, PLATFORMS, SPOTS } from '../shared/mall.js';
 import { FIXTURES } from '../shared/lights.js';
 
-const CHUNK = 32;
+// The chunks: split where the building is (Halvorsen's, the west wing,
+// the court, the east wing, the food court; behind the scenes, the
+// shops and concourse, outside) so nothing in plain view straddles two.
+const XCUT = [-40, -10, 10, 40], ZCUT = [-17.25, 17.6];
+const chunkOf = (x, z) => `${XCUT.filter((c) => x >= c).length}:${ZCUT.filter((c) => z >= c).length}`;
 
-// Plain coloured materials (no texture, no glow, not see-through) all
-// become one of a few shared materials with the colour in the vertices,
-// so a hundred differently painted props merge into a handful of meshes.
+// Opaque materials with no glow and no bump all become one of a few shared
+// materials per texture (or none), with the colour in the vertices, so a
+// hundred differently painted props merge into a handful of meshes.
 const plainMats = new Map();
 function plainKey(m) {
-  if (!m.isMeshStandardMaterial || m.map || m.alphaMap || m.transparent || m.vertexColors || m.bumpMap) return null;
+  if (!m.isMeshStandardMaterial || m.alphaMap || m.transparent || m.vertexColors || m.bumpMap || m.emissiveMap || m.polygonOffset) return null;
   if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) * m.emissiveIntensity > 0.001) return null;
   const r = m.roughness < 0.45 ? 0.3 : m.roughness < 0.75 ? 0.6 : 0.9, mt = m.metalness > 0.35 ? 0.6 : 0;
-  const k = `plain:${r}:${mt}:${m.side}`;
-  if (!plainMats.has(k)) plainMats.set(k, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: r, metalness: mt, side: m.side }));
+  const k = `plain:${m.map ? m.map.uuid : ''}:${r}:${mt}:${m.side}`;
+  if (!plainMats.has(k)) plainMats.set(k, new THREE.MeshStandardMaterial({ map: m.map || null, vertexColors: true, roughness: r, metalness: mt, side: m.side }));
   return k;
 }
 
@@ -53,7 +56,7 @@ function mergeStatic(root, { shadows = true } = {}) {
     const c = new THREE.Vector3();
     g.boundingBox.getCenter(c);
     const material = pk ? plainMats.get(pk) : o.material;
-    const key = `${material.uuid}:${Math.floor(c.x / CHUNK)}:${Math.floor(c.z / CHUNK)}`;
+    const key = `${material.uuid}:${chunkOf(c.x, c.z)}`;
     if (!byKey.has(key)) byKey.set(key, { material, list: [], cast: false });
     const e = byKey.get(key);
     e.list.push(g);
@@ -125,11 +128,7 @@ export class Mall {
     s.background = new THREE.Color(0x04060a);
     this.fog = new THREE.FogExp2(0x05070a, 0.006);
     s.fog = this.fog;
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    this.env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-    s.environment = this.env;
-    s.environmentIntensity = 0.05;
+    void renderer;
     this.t = 0;
     this.state = { breakers: { concourse: true, court: true, food: true, stores: false, back: true, cams: true }, carousel: false };
     this.flags = 0;
@@ -144,8 +143,36 @@ export class Mall {
     this.buildDoors();
     const merged = mergeStatic(this.statics);
     s.add(merged);
+    // the parts that move or change (screens, the carousel, the fountain's
+    // water, switches, Dale's locker door) stay whole, where they were
+    const kept = [];
+    const findKept = (o) => { for (const c of o.children) { if (c.userData.keep) kept.push(c); else findKept(c); } };
+    findKept(this.statics);
+    for (const o of kept) s.attach(o);
+    // Far-off detail isn't drawn: past forty-odd metres, in the dark and
+    // the haze, there's nothing of a gate or a screen to make out, and each
+    // is a few draw calls. Bigger things stay longer. Judged from whichever
+    // camera is drawing, so the security cameras see what's near them.
+    this.far = [];
+    for (const o of [...kept, ...this.stations, ...this.doorViews.map((v) => v.group)]) this.addFar(o);
     this.buildLights();
     this.applyLights();
+  }
+
+  addFar(o, { ref = null, far = 0, owner = null } = {}) {
+    let box = null;
+    if (!ref) {
+      box = new THREE.Box3().setFromObject(o);
+      const size = box.getSize(new THREE.Vector3());
+      far = far || 40 + 4 * Math.max(size.x, size.y, size.z);
+    }
+    this.far.push({ o, box, ref, far, owner });
+  }
+
+  dropFar(owner) { this.far = this.far.filter((e) => e.owner !== owner); }
+
+  cullFrom(p) {
+    for (const e of this.far) e.o.visible = (e.box ? e.box.distanceToPoint(p) : e.ref.position.distanceTo(p)) < e.far;
   }
 
   // ------------------------------------------------------------ materials
@@ -530,10 +557,14 @@ export class Mall {
   // ------------------------------------------------------------- lights
   buildLights() {
     const s = this.scene;
-    this.hemi = new THREE.HemisphereLight(0x8a9ab8, 0x2a241c, 0.12);
-    s.add(this.hemi);
-    // everyone's flashlight (always in the scene so nothing recompiles
-    // when one comes on); yours casts shadows
+    // a little light from everywhere, so the dark isn't black (an even
+    // wash costs nothing per pixel, where a reflected room did)
+    this.hemi = new THREE.HemisphereLight(0x8a9ab8, 0x2a241c, 0.14);
+    this.ambient = new THREE.AmbientLight(0xb4bccc, 0.3);
+    s.add(this.hemi, this.ambient);
+    // a flashlight for each guard on the night (every light in the scene
+    // costs every pixel, so there are only as many as there are guards);
+    // yours casts shadows
     this.flashlights = [];
     for (let i = 0; i < 4; i++) {
       const f = new THREE.SpotLight(0xfff2e0, 0, 28, 0.44, 0.45, 1.4);
@@ -543,18 +574,36 @@ export class Mall {
         f.shadow.bias = -0.0004;
         f.shadow.normalBias = 0.02;
         f.shadow.camera.near = 0.2;
-        f.shadow.camera.far = 28;
+        f.shadow.camera.far = 22;
       }
-      s.add(f, f.target);
       this.flashlights.push(f);
     }
+    this.useFlashlights(1);
     // its flashlight
     this.hisLight = new THREE.SpotLight(0xfff0d8, 0, 30, 0.36, 0.5, 1.3);
     s.add(this.hisLight, this.hisLight.target);
-    // the monitors' glow in the office, and the parking lot's lamps on the car
-    this.screenGlow = new THREE.PointLight(0x9ad0ff, 0, 5, 2);
-    this.screenGlow.position.set(0, 1.8, -26.6);
-    s.add(this.screenGlow);
+  }
+
+  // n flashlights in the scene (changing it rebuilds every shader, so it's
+  // done once, as a night starts); true if it changed
+  useFlashlights(n) {
+    n = Math.max(1, Math.min(4, n));
+    if (n === this.flashCount) return false;
+    this.flashCount = n;
+    this.flashlights.forEach((f, i) => {
+      if (i < n) this.scene.add(f, f.target);
+      else { f.intensity = 0; this.scene.remove(f, f.target); }
+    });
+    return true;
+  }
+
+  // the flashlight's shadow map: 1024 square, or 512 when the computer's
+  // struggling
+  shadowSize(n) {
+    const sh = this.flashlights[0].shadow;
+    if (sh.mapSize.x === n) return;
+    sh.mapSize.set(n, n);
+    if (sh.map) { sh.map.dispose(); sh.map = null; }
   }
 
   applyLights(extra = {}) {
@@ -592,7 +641,7 @@ export class Mall {
   // his: its flashlight { on, pos, dir }
   update(dt, t, { flashes = [], his = null, camera = null } = {}) {
     this.t = t;
-    for (let i = 0; i < this.flashlights.length; i++) {
+    for (let i = 0; i < this.flashCount; i++) {
       const f = this.flashlights[i], F = flashes[i];
       if (F && F.on) {
         f.intensity = 22;
@@ -612,10 +661,9 @@ export class Mall {
       const on = (this.flags & 2) !== 0;
       car.userData.speed = (car.userData.speed || 0) + ((on ? 0.45 : 0) - (car.userData.speed || 0)) * Math.min(1, dt * 0.6);
       car.userData.spin.rotation.y += car.userData.speed * dt;
+      car.userData.bulbs.forEach((b, k) => { b.visible = !on || Math.floor(t * 6 + k) % 3 !== 0; });
       for (const [i, c] of car.userData.spin.children.entries()) {
-        const p = c.position;
-        if (c.isMesh && c.geometry.type === 'SphereGeometry' && p.y > 3.5) c.visible = !on || Math.floor(t * 6 + i) % 3 !== 0;
-        if (c.isGroup && c.position.y > 0.9) c.position.y = 1.0 + ((i % 2) * 0.25) + (on ? Math.sin(t * 2 + i) * 0.2 : 0);
+        if (c.isGroup) c.position.y = 1.0 + ((i % 2) * 0.25) + (on ? Math.sin(t * 2 + i) * 0.2 : 0);
       }
       car.userData.bulbMat.color.setScalar(on ? 2.4 : 0.15);
     }
@@ -636,12 +684,12 @@ export class Mall {
     // the fountain's water shivers
     const fw = this.live.fountain?.userData.water;
     if (fw) fw.position.y = 0.45 + Math.sin(t * 1.3) * 0.004;
-    this.screenGlow.intensity = this.state.breakers.cams ? 1.2 : 0;
     if (this.envelope) this.envelope.rotation.y = 0.3;
     void camera;
   }
 
   render(renderer, camera, target) {
+    this.cullFrom(camera.position);
     renderer.setRenderTarget(target);
     renderer.render(this.scene, camera);
   }
