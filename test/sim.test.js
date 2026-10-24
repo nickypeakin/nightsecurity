@@ -1,302 +1,565 @@
-// Plays whole nights on the host simulation, in Node, with scripted guards
-// who do what the objectives ask: lock up, check in, walk the rounds, reset
-// the breakers, find the locker code in the logbook, get Dale out, hole up
-// in the office, let the manager in and file the report. Checks every
-// night reaches an ending without errors and that the pieces along the way
-// work: the gates and locks, the panel, the clock stations, the power, the
-// mannequins (they move, they freeze when watched, locked gates stop
-// them), the thing in Dale's uniform, Dale, the report.
+// Runs the city on the host simulation, in Node, with scripted players.
+// Checks the streets come alive (traffic that drives on the roads and
+// keeps moving, people on the pavements), that crimes bring the police and
+// the police can bust you, that you can be wasted and come back, that
+// shooting, carjacking, running people over, burning cars, pickups, the
+// gun shop, Spray-N-Go, saving and co-op all work, and plays every job
+// from the first to the credits.
 //
 // usage: node test/sim.test.js
 
-import { Match, WATCHED } from '../public/js/host/match.js';
-import { SPOTS, DOORS, DOOR_INDEX, STATIONS, DALE_SPOTS, HIDES, roomAt } from '../public/js/shared/mall.js';
-import { INTRO_LEN, TICK, HOUR_LEN } from '../public/js/shared/config.js';
-import { REPORT } from '../public/js/shared/story.js';
+import { Match, INTRO_LEN } from '../public/js/host/match.js';
+import { TICK, WEAPONS, PRICES, MAX_HP } from '../public/js/shared/config.js';
+import { PLACES, onRoad, openAt } from '../public/js/shared/city.js';
+import { MISSIONS, TAPES, TAPE_PAY } from '../public/js/shared/story.js';
 
 let failures = 0;
 const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } };
+const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
-function setup(n, seed, { start = 0, immortal = false } = {}) {
+function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) {
   const log = [];
   const roster = Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, name: ['Ana', 'Ben', 'Cal', 'Dee'][i], color: i }));
-  const m = new Match({ seed, roster, send: (to, msg) => log.push({ to, msg }), start });
-  if (immortal) m.capture = () => {};
+  const m = new Match({ seed, roster, send: (to, msg) => log.push({ to, msg }), start, save });
+  if (immortal) m.hurtPlayer = () => {};
   const P = (i) => m.players[i];
   const H = {
     m, log, P,
-    st: (i, x, z, extra = {}) => m.handle(P(i).id, { t: 'st', x, z, ry: 0, rx: 0, mv: 0, fl: 1, ...extra }),
-    // stand in front of a spot, looking at it
-    at: (i, key, extra = {}) => {
-      const s = SPOTS[key];
-      const p = { x: s.x, z: s.z + 1.0 };
-      if (Math.hypot(s.x, s.z - p.z) < 0.1) p.z = s.z - 1.0;
-      H.st(i, s.x + 0.4, s.z + (s.z > -20.6 && s.z < -17 ? 0.8 : s.z < -21 ? 1.0 : -1.0), extra);
+    // what each player's browser would send: where they are (or where
+    // their car is, if they're driving it)
+    st: (i, extra = {}) => {
+      const p = P(i);
+      const msg = { t: 'st', x: p.x, z: p.z, y: 0, h: p.h, ay: p.ay, ap: 0, v: 0, a: 0, w: p.w, ...extra };
+      const c = p.car != null ? m.cars.get(p.car) : null;
+      if (c && p.seat === 0) msg.cs = [c.x, c.z, c.h, c.v, c.s, c.w, c.steer];
+      m.handle(p.id, msg);
     },
-    atDoor: (i, id) => {
-      const d = DOORS[DOOR_INDEX[id]];
-      // on the inside of the building / the near side
-      const off = 0.9;
-      if (d.axis === 'x') H.st(i, d.mid, d.at + (d.at > 0 ? -off : off));
-      else H.st(i, d.at + (d.at > 0 ? -off : off), d.mid);
+    step: (sec, each = null) => {
+      for (let k = 0; k < sec / TICK; k++) {
+        for (let i = 0; i < m.players.length; i++) H.st(i);
+        if (each) each();
+        m.step(TICK);
+        if (m.over) break;
+      }
     },
-    use: (i, k) => m.handle(P(i).id, { t: 'use', k }),
-    lock: (i, id) => m.handle(P(i).id, { t: 'lock', k: id }),
-    step: (sec) => { for (let k = 0; k < sec / TICK; k++) { m.step(TICK); if (m.over) break; } },
-    door: (id) => m.doors[DOOR_INDEX[id]],
+    // walk (teleport) to a spot
+    go: (i, x, z) => { const p = P(i); p.x = x; p.z = z; },
+    // put the car player i drives somewhere (as their browser would)
+    driveTo: (i, x, z, h = null) => { const c = m.cars.get(P(i).car); c.x = x; c.z = z; if (h != null) c.h = h; c.v = 0; c.s = 0; c.w = 0; },
+    enter: (i, c) => { H.go(i, c.x + Math.cos(c.h) * 1.8, c.z - Math.sin(c.h) * 1.8); H.st(i); m.handle(P(i).id, { t: 'enter', car: c.id }); },
+    exit: (i) => m.handle(P(i).id, { t: 'exit' }),
+    // shoot at a point from where player i stands
+    shoot: (i, x, y, z, w = P(i).w) => {
+      const p = P(i), pos = m.playerPos(p);
+      const o = [pos.x, 1.45, pos.z], d = [x - o[0], y - o[1], z - o[2]], l = Math.hypot(...d);
+      m.handle(p.id, { t: 'fire', w, o, d: d.map((v) => v / l) });
+    },
     msgs: (t) => log.filter((e) => e.msg.t === t).map((e) => e.msg),
-  };
-  // shut and lock a door or gate, whatever state it's in
-  H.secure = (i, id) => {
-    H.atDoor(i, id);
-    const s = H.door(id);
-    if (s.target > 0.5) H.use(i, `door:${id}`);
-    H.step(s.open > 0.05 ? (DOORS[DOOR_INDEX[id]].kind === 'gate' ? 3 : 1) : 0.1);
-    if (!s.locked) H.lock(i, id);
+    banners: () => log.filter((e) => e.msg.t === 'banner').map((e) => e.msg.text),
+    clear: () => { log.length = 0; },
   };
   return H;
 }
 
-// ------------------------------------------------------------ a whole night
-function night(n, seed, { immortal = true, wrong = false } = {}) {
-  const H = setup(n, seed, { immortal });
-  const { m, step, use, lock, at } = H;
-  step(INTRO_LEN + 0.5);
-  check(m.hourId === 'lockup', `${seed}: lockup starts after the intro (got ${m.hourId})`);
-  check(m.openCount() === 7, `${seed}: seven things open at closing (got ${m.openCount()})`);
-
-  // ---- 10 PM: lock up and check in
-  for (const id of ['south', 'east', 'dockDoor', ...m.leftOpen]) H.secure(0, id);
-  check(m.isDone('south') && m.isDone('east') && m.isDone('dock'), `${seed}: outside doors locked`);
-  check(m.isDone('gates'), `${seed}: open gates locked (${m.objective('gates')?.n})`);
-  check(m.openCount() === 0, `${seed}: the panel's green (got ${m.openCount()})`);
-  at(0, 'logbook');
-  use(0, 'logbook');
-  check(m.clues.has('logbook'), `${seed}: read the logbook`);
-  m.handle(m.players[0].id, { t: 'radio', k: 'checkin' });
-  check(m.isDone('checkin'), `${seed}: checked in`);
-  step(20);
-  check(H.msgs('say').some((s) => s.radio && s.who === 'Gatehouse'), `${seed}: dispatch answers`);
-  // the clock moves on now the lockup's done
-  for (let k = 0; k < 400 && m.hourId === 'lockup'; k++) step(1);
-  check(m.hourId === 'round1', `${seed}: eleven o'clock (got ${m.hourId}, clock ${m.clock.toFixed(2)})`);
-
-  // a round: everyone walks a share of the stations
-  const round = () => {
-    for (const s of STATIONS) {
-      const i = s.n % n;
-      at(i, `station${s.n}`);
-      use(i, `station${s.n}`);
+// ------------------------------------------------------ the streets alive
+{
+  console.log('the city comes alive');
+  const H = setup(2, 'streets');
+  const { m } = H;
+  H.go(1, 0, -32.5);
+  let maxTick = 0;
+  const moved = new Map();
+  let offRoad = 0, samples = 0, blocked = 0, pedSamples = 0;
+  for (let k = 0; k < 90 / TICK; k++) {
+    for (let i = 0; i < 2; i++) H.st(i);
+    const a = performance.now();
+    m.step(TICK);
+    maxTick = Math.max(maxTick, k > 40 ? performance.now() - a : 0);
+    if (k % 20 === 0) {
+      for (const c of m.cars.values()) {
+        if (!c.ai || c.ai.mode === 'park') continue;
+        const s = moved.get(c.id) || { x: c.x, z: c.z, d: 0 };
+        s.d += Math.hypot(c.x - s.x, c.z - s.z); s.x = c.x; s.z = c.z;
+        moved.set(c.id, s);
+        samples++;
+        if (!onRoad(c.x, c.z)) offRoad++;
+      }
+      for (const p of m.peds.values()) {
+        if (p.dead || p.kind !== 'civ') continue;
+        pedSamples++;
+        if (!openAt(m.solids, p.x, p.z, 0.15)) blocked++;
+      }
     }
-  };
-  round();
-  check(m.round.punched.every((x) => x), `${seed}: round one punched (${m.round.punched})`);
-  // some clues on the way
-  at(0, 'watchclock'); use(0, 'watchclock');
-  at(0, 'car'); use(0, 'car');
-  check(m.clues.has('tape') && m.clues.has('car'), `${seed}: tape and car`);
-
-  const waitHour = (id, max = 400) => { for (let k = 0; k < max && m.hourId !== id && !m.over; k++) step(1); };
-  const relock = () => { for (const k of WATCHED) { const s = m.doors[k]; if (!(s.locked && s.open < 0.05)) H.secure(0, DOORS[k].id); } };
-
-  // ---- midnight: the PA
-  waitHour('midnight');
-  check(m.flags.pa, `${seed}: the PA comes on at midnight`);
-  step(5);
-  check(m.mq.awake === 2, `${seed}: two mannequins awake (${m.mq.awake})`);
-  at(0, 'pa'); use(0, 'pa');
-  check(!m.flags.pa && m.isDone('pa'), `${seed}: PA off`);
-  at(0, 'photos'); use(0, 'photos');
-  check(m.clues.has('photos'), `${seed}: Dale's photos`);
-  relock();
-
-  // ---- 1 AM: the power, the second round, it walks
-  waitHour('round2');
-  step(12);
-  check(!m.breakers.concourse, `${seed}: the power goes`);
-  check(m.stalker.on, `${seed}: the thing in the uniform is out`);
-  for (const b of ['concourse', 'court', 'food', 'stores']) { at(0, 'breaker'); use(0, `breaker:${b}`); }
-  check(m.breakers.concourse && m.isDone('power'), `${seed}: breakers reset`);
-  round();
-  check(m.round.n === 2 && m.round.punched.every((x) => x), `${seed}: round two punched`);
-  step(60);
-  check(m.stalker.pi > 0 || m.stalker.mode !== 'round', `${seed}: it walks its round (pi ${m.stalker.pi}, mode ${m.stalker.mode})`);
-  relock();
-
-  // ---- 2 AM: channel two, the locker, Dale
-  waitHour('channel2');
-  for (let k = 0; k < 80 && !m.clues.has('channel2'); k++) step(1);
-  check(m.clues.has('channel2'), `${seed}: Dale on channel two`);
-  at(0, 'locker');
-  m.handle(m.players[0].id, { t: 'code', v: '000' });
-  check(!m.flags.keys, `${seed}: the wrong code doesn't open it`);
-  m.handle(m.players[0].id, { t: 'code', v: m.code.split('').join('-') });
-  check(m.flags.keys, `${seed}: the locker opens with the code from the book`);
-  const ds = DALE_SPOTS[m.place];
-  H.atDoor(0, ds.door);
-  lock(0, ds.door);
-  check(!H.door(ds.door).locked, `${seed}: Dale's door unlocks with the spare keys`);
-  use(0, `door:${ds.door}`);
-  step(2);
-  check(m.dale.mode === 'follow', `${seed}: Dale's out (${m.dale.mode})`);
-  // walk him back to the office, a few metres ahead of him at a time
-  for (let k = 0; k < 400 && m.dale.mode === 'follow'; k++) {
-    const D = m.nav.field(0, -24.4, (j) => DOORS[j].kind !== 'glass' && DOORS[j].kind !== 'rollup' && (m.doors[j].open > 0.5 || !m.doors[j].locked));
-    let i = m.nav.idx(m.dale.x, m.dale.z);
-    for (let s = 0; s < 6; s++) {
-      let best = i;
-      for (const dd of [-1, 1, -268, 268, -269, -267, 267, 269]) if (D[i + dd] < D[best]) best = i + dd;
-      i = best;
-    }
-    H.st(0, m.nav.cx(i), m.nav.cz(i));
-    step(0.5);
   }
-  check(m.dale.mode === 'safe', `${seed}: Dale's safe in the office (${m.dale.mode} at ${m.dale.x.toFixed(1)}, ${m.dale.z.toFixed(1)})`);
-  relock();
-
-  // ---- 3 AM: the carousel, round three
-  waitHour('round3');
-  step(8);
-  check(m.flags.carousel, `${seed}: the carousel starts by itself`);
-  at(0, 'carousel'); use(0, 'carousel');
-  check(!m.flags.carousel, `${seed}: carousel off`);
-  round();
-  for (const b of Object.keys(m.breakers)) if (!m.breakers[b] && b !== 'stores') { at(0, 'breaker'); use(0, `breaker:${b}`); }
-  relock();
-
-  // ---- 5 AM: everyone in the office, door locked
-  waitHour('last');
-  check(m.siege && m.mq.awake === m.mq.list.length, `${seed}: all of them awake for the last hour`);
-  for (let i = 0; i < n; i++) H.st(i, -1 + i * 0.6, -24.6, { cam: i % 8 });
-  const sd = H.door('security');
-  H.st(0, 0, -21.7);
-  if (sd.target > 0.5) use(0, 'door:security');
-  step(1.5);
-  lock(0, 'security');
-  check(sd.locked, `${seed}: deadbolt on`);
-  for (let i = 0; i < n; i++) H.st(i, -1 + i * 0.6, -24.6, { cam: 5 });
-  check(m.isDone('deadbolt'), `${seed}: deadbolt objective`);
-  step(3);
-  check(m.isDone('gather') || m.objective('gather')?.n === n, `${seed}: everyone in the office (${m.objective('gather')?.n})`);
-
-  // ---- 6 AM: the manager, the report
-  waitHour('dawn', 600);
-  check(m.hourId === 'dawn', `${seed}: dawn (got ${m.hourId})`);
-  check(m.mq.list.every((q) => !q.active), `${seed}: mannequins asleep at dawn`);
-  step(2);
-  if (m.doors[DOOR_INDEX.south].locked) { H.atDoor(0, 'south'); lock(0, 'south'); }
-  step(8);
-  check(m.report.open, `${seed}: the report opens`);
-  const right = [REPORT[0].right, REPORT[1].right, { cage: 1, freezer: 2, elevator: 3 }[m.place]];
-  right.forEach((a, q) => m.handle(m.players[q % n].id, { t: 'report', q, a: wrong && q === 0 ? 0 : a }));
-  m.handle(m.players[0].id, { t: 'file' });
-  check(m.over, `${seed}: report filed, the night's over`);
-  const over = H.msgs('over')[0];
-  check(over && over.ending === (wrong ? 'good' : 'best'), `${seed}: ending ${over && over.ending}`);
-  check(over && over.stats && over.stats.grade, `${seed}: graded ${over && over.stats.grade}`);
-  check(m.mq.moved > 3, `${seed}: the mannequins moved (${m.mq.moved.toFixed(1)} m)`);
-  return { m, over };
+  const traffic = [...m.cars.values()].filter((c) => c.ai && c.ai.mode === 'cruise');
+  const civs = [...m.peds.values()].filter((p) => p.kind === 'civ' && !p.dead);
+  const walking = civs.filter((p) => p.v > 0.5);
+  const far = [...moved.values()].filter((s) => s.d > 120).length;
+  console.log(`  ${m.cars.size} cars (${traffic.length} in traffic, ${far} drove 120 m+), ${civs.length} people (${walking.length} walking), slowest tick ${maxTick.toFixed(1)} ms`);
+  check(traffic.length >= 12, `traffic appears (${traffic.length})`);
+  check(far >= 8, `traffic keeps moving (${far} cars drove 120 m+)`);
+  check(offRoad / samples < 0.03, `traffic stays on the roads (${offRoad} of ${samples} off)`);
+  check(civs.length >= 25, `people on the streets (${civs.length})`);
+  check(walking.length >= civs.length * 0.5, `people walk about (${walking.length} of ${civs.length})`);
+  check(blocked / pedSamples < 0.02, `people stay out of walls (${blocked} of ${pedSamples})`);
+  check([...m.cars.values()].some((c) => c.parkedSpot != null), 'parked cars at the kerbs');
+  check(maxTick < 60, `the host keeps up (slowest tick ${maxTick.toFixed(1)} ms)`);
+  const snap = H.msgs('s').pop();
+  const bytes = JSON.stringify(snap).length;
+  check(bytes < 24000, `snapshots stay small (${bytes} bytes)`);
+  check(snap.p.length === 2 && snap.c.length === m.cars.size, 'snapshots carry everyone');
+  check(snap.intro === -1, 'the intro was skipped');
 }
 
-// ---------------------------------- mannequins: watched, unwatched, locked in
-function mannequinRules(seed) {
-  const H = setup(1, seed, { start: 2 });
-  const { m, step } = H;
-  step(INTRO_LEN + 0.5);
-  check(m.hourId === 'midnight', `${seed}: started at midnight (got ${m.hourId})`);
-  // wake one in Halvorsen's, Halvorsen's locked, a guard on the concourse
-  m.mq.wake(99);
-  H.st(0, -30, 0, { ry: Math.PI / 2 });
-  // stand still facing away from Halvorsen's: none can reach us through the locked gate
-  m.capture = (p) => { p.caught = true; };
-  step(20);
-  check(!m.players[0].caught, `${seed}: the locked gate keeps Halvorsen's mannequins in`);
-  const inside = m.mq.list.filter((q) => q.home.x < -40.5);
-  check(inside.every((q) => q.x < -40), `${seed}: they're all still inside Halvorsen's`);
-  // watch one: it doesn't move
-  const q = inside[0];
-  const keep = [q.x, q.z];
-  // stand in Halvorsen's, looking straight at it, flashlight on, everyone else in view too
-  const ry = Math.atan2(-(q.x - (q.x + 3)), -(q.z - q.z));
-  m.handle(m.players[0].id, { t: 'st', x: q.x + 3, z: q.z, ry, rx: -0.3, mv: 0, fl: 1 });
-  const seen = m.observed(q.x, 1.25, q.z);
-  check(!!seen, `${seed}: a mannequin in your light is seen`);
-  step(1);
-  check(Math.hypot(q.x - keep[0], q.z - keep[1]) < 0.05, `${seed}: and doesn't move while you watch it (moved ${Math.hypot(q.x - keep[0], q.z - keep[1]).toFixed(2)})`);
-  // look away: something moves
-  m.handle(m.players[0].id, { t: 'st', x: q.x + 3, z: q.z, ry: ry + Math.PI, rx: 0, mv: 0, fl: 0 });
-  const before = m.mq.moved;
-  step(2);
-  check(m.mq.moved > before, `${seed}: look away and they move`);
-  // the camera counts as watching
-  const cam = { ...m.players[0] };
-  void cam;
+// ------------------------------------------------------ the intro
+{
+  console.log('the intro');
+  const H = setup(1, 'intro', { start: 0 });
+  H.step(2);
+  check(H.msgs('s').pop().intro > 0, 'the intro plays');
+  H.m.handle('p1', { t: 'skip' });
+  H.step(0.2);
+  check(H.msgs('s').pop().intro === -1, 'Space skips it');
+  const H2 = setup(1, 'intro2', { start: 0 });
+  H2.step(INTRO_LEN + 0.5);
+  check(H2.msgs('s').pop().intro === -1, 'and it ends by itself');
 }
 
-// ------------------------------------------- the thing finds a lone guard
-function stalkerHunts(seed) {
-  const H = setup(1, seed, { start: 3 });
-  const { m, step } = H;
-  step(INTRO_LEN + 0.5);
-  step(12);
-  check(m.stalker.on, `${seed}: it's out at one`);
-  // put it on the concourse, and a guard in front of it with a flashlight
-  m.stalker.x = -20; m.stalker.z = 0; m.stalker.ry = Math.PI / 2;  // facing west
-  let caught = false;
-  m.capture = () => { caught = true; };
-  H.st(0, -27, 0, { ry: -Math.PI / 2, fl: 1 });
-  for (let k = 0; k < 60 && m.stalker.mode !== 'chase'; k++) step(0.1);
-  check(m.stalker.mode === 'chase', `${seed}: it sees a guard with a flashlight on the concourse (${m.stalker.mode})`);
-  // the guard shines the light in its face: that stops it for a moment
-  check(H.msgs('fx').some((f) => f.k === 'stun'), `${seed}: a flashlight in its face stops it`);
-  // then turns their back on it and stands there
-  H.st(0, -27, 0, { ry: Math.PI / 2, fl: 0 });
-  step(8);
-  check(caught, `${seed}: and catches someone who just stands there`);
-  // hide where it can't see: it gives up
-  const H2 = setup(1, seed + 'b', { start: 3 });
-  H2.step(INTRO_LEN + 12.5);
-  const m2 = H2.m;
-  m2.capture = () => { caught = 'again'; };
-  m2.stalker.x = -30; m2.stalker.z = 0; m2.stalker.ry = 0;
-  const hide = HIDES.find((h) => h.id === 'locker1');
-  H2.st(0, hide.x - 0.9, hide.z);
-  H2.use(0, `hide:${hide.id}`);
-  check(m2.players[0].hide === 'locker1', `${seed}: hid in a locker`);
-  H2.step(30);
-  check(caught !== 'again', `${seed}: nobody finds you in the locker if they didn't see you get in`);
-  H2.use(0, `hide:${hide.id}`);
-  check(m2.players[0].hide == null && roomAt(m2.players[0].x, m2.players[0].z)?.id === 'break', `${seed}: out of the locker, in the break room`);
+// ------------------------------------------------------ crime and the police
+{
+  console.log('crime, the police, busted');
+  const H = setup(1, 'police');
+  const { m, P } = H;
+  const p = P(0);
+  H.go(0, 0, -32.5);
+  H.step(5);
+  // shoot somebody in the street
+  m.giveWeapon(p, 'pistol', 48);
+  const ped = [...m.peds.values()].filter((q) => q.kind === 'civ' && !q.dead).sort((a, b) => dist(a, p) - dist(b, p))[0];
+  check(!!ped, 'somebody to shoot');
+  const from = [[-4, 0], [4, 0], [0, -4], [0, 4], [-3, -3], [3, 3]].map(([dx, dz]) => ({ x: ped.x + dx, z: ped.z + dz })).find((q) => openAt(m.solids, q.x, q.z, 0.4) && m.solids.clear(q.x, 1.45, q.z, ped.x, 1.2, ped.z));
+  H.go(0, from.x, from.z);
+  for (let k = 0; k < 10 && !ped.dead; k++) { ped.walkTo = null; H.go(0, from.x, from.z); H.shoot(0, ped.x, 1.2, ped.z, 1); H.step(0.35); }
+  check(ped.dead, 'a pistol kills');
+  check(p.wanted >= 1, `killing a civilian brings stars (${p.wanted})`);
+  check(p.ammo[1] < 48, 'shots use ammo');
+  check(H.msgs('fx').some((f) => f.k === 'shot'), 'shots are seen');
+  check(H.msgs('say').some((s) => s.radio), 'dispatch calls it in');
+  const money = p.money;
+  // stand still: the police come and arrest you
+  let units = 0, cops = 0, at = null;
+  for (let k = 0; k < 90 / TICK; k++) {
+    H.st(0, { x: p.x, z: p.z });
+    m.step(TICK);
+    units = Math.max(units, [...m.cars.values()].filter((c) => c.police && c.chasing === p.id).length);
+    cops = Math.max(cops, [...m.peds.values()].filter((c) => c.kind === 'cop' && !c.dead).length);
+    if (p.state !== 'alive') { at = k * TICK; break; }
+  }
+  console.log(`  ${units} police cars came, ${cops} officers on foot, ${p.state} after ${at?.toFixed(1)} s`);
+  check(units >= 1, 'police cars come');
+  check(cops >= 1, 'officers get out');
+  check(p.state === 'busted' || p.state === 'wasted', `standing still gets you caught (${p.state})`);
+  check(H.banners().includes(p.state.toUpperCase()), 'the big words');
+  const busted = p.state === 'busted';
+  H.step(7);
+  check(p.state === 'alive', 'back on your feet');
+  check(p.wanted === 0, 'and nobody wants you');
+  const back = busted ? PLACES.police : PLACES.hospital;
+  check(dist(p, back) < 6, `at the ${busted ? 'police station' : 'hospital'}`);
+  check(p.money === Math.max(0, money - (busted ? PRICES.busted : PRICES.hospital)), 'and it cost you');
+  if (busted) check(p.ammo[1] === -1, 'busted takes your guns');
+  check(H.msgs('respawn').length === 1, 'the client is told');
 }
 
-// ------------------------------------------------------- everyone's taken
-function allTaken(seed) {
-  const H = setup(2, seed, { start: 7 });
-  const { m, step } = H;
-  step(INTRO_LEN + 0.5);
-  check(m.hourId === 'last', `${seed}: started at five (got ${m.hourId})`);
-  // two guards standing in the dark in Halvorsen's, looking at the wall
-  H.st(0, -58, 4, { ry: Math.PI / 2, fl: 0 });
-  H.st(1, -58, 6, { ry: Math.PI / 2, fl: 0 });
-  for (let k = 0; k < 300 && !m.over; k++) { step(1); H.st(0, -58, 4, { ry: Math.PI / 2, fl: 0 }); H.st(1, -58, 6, { ry: Math.PI / 2, fl: 0 }); }
-  check(m.over, `${seed}: the night ends when everyone's taken`);
-  const over = H.msgs('over')[0];
-  check(over && over.ending === 'taken', `${seed}: ending ${over && over.ending}`);
+// ------------------------------------------------------ getting away
+{
+  console.log('losing the police');
+  const H = setup(1, 'getaway');
+  const { m, P } = H;
+  const p = P(0);
+  H.go(0, -40 + 7.5, -40 + 20);
+  H.step(3);
+  m.police.crime(p, 0, 1);
+  check(p.wanted === 1, 'one star');
+  // wait for them to find you
+  for (let k = 0; k < 40 / TICK && !p.found && p.state === 'alive'; k++) { H.st(0); m.step(TICK); }
+  check(p.found, 'the police find you');
+  // then get clean away (as if you'd driven off fast), out of sight
+  H.go(0, 200 - 7.5, 160);
+  let lost = null;
+  for (let k = 0; k < 60 / TICK && lost == null && p.state === 'alive'; k++) {
+    H.st(0, { v: 0 });
+    m.step(TICK);
+    if (!p.wanted) lost = k * TICK;
+  }
+  console.log(`  ${lost != null ? `lost them after ${lost.toFixed(1)} s` : `still wanted (${p.state})`}`);
+  check(lost != null, 'one star wears off once they lose you');
+  check(H.msgs('say').some((s) => s.radio && /gone/.test(s.text)), 'dispatch calls it off');
+  H.step(20);
+  check(![...m.cars.values()].some((c) => c.police && c.chasing), 'and the police stop chasing');
 }
 
-const t0 = Date.now();
-for (const [n, seed] of [[1, 'solo-a'], [2, 'duo-b'], [4, 'four-c']]) {
-  console.log(`night: ${n} guard(s), seed ${seed}`);
-  night(n, seed);
+// ------------------------------------------------------ cars
+{
+  console.log('cars: stealing, jacking, running people over, burning');
+  const H = setup(2, 'cars', { immortal: false });
+  const { m, P } = H;
+  const p = P(0);
+  H.go(0, 120 - 7.5, 0);
+  H.go(1, 120 - 7.5, 3);
+  H.step(20);
+  // jack a car out of traffic
+  const victim = [...m.cars.values()].filter((c) => c.ai && c.ai.mode === 'cruise' && c.driverLook != null && !c.police).sort((a, b) => dist(a, p) - dist(b, p))[0];
+  check(!!victim, 'traffic to jack');
+  const pedsBefore = m.peds.size;
+  victim.v = 0;
+  H.enter(0, victim);
+  check(p.car === victim.id && p.seat === 0, 'F takes the wheel');
+  check(m.peds.size === pedsBefore + 1, 'the driver is thrown out');
+  check(victim.ai === null, 'and the car is yours');
+  check(H.msgs('entered').length === 1, 'your browser is told');
+  // a friend climbs in the other side
+  H.enter(1, victim);
+  check(P(1).car === victim.id && P(1).seat === 1, 'a friend rides along');
+  // drive (as the browser would) and the host follows
+  H.step(0.2);
+  victim.x += 10;
+  H.step(0.2);
+  check(Math.abs(m.playerPos(p).x - victim.x) < 0.01, 'the host follows your car');
+  check(Math.abs(m.playerPos(P(1)).x - victim.x) < 0.01, 'and your passenger with it');
+  // run somebody over
+  const ped = [...m.peds.values()].find((q) => q.kind === 'civ' && !q.dead);
+  ped.x = victim.x + Math.sin(victim.h) * 3; ped.z = victim.z + Math.cos(victim.h) * 3; ped.walkTo = null;
+  victim.v = 14;
+  m.stepImpacts();
+  victim.x += Math.sin(victim.h) * 1.5; victim.z += Math.cos(victim.h) * 1.5;
+  m.stepImpacts();
+  check(ped.hp < 40, `running people over hurts them (hp ${ped.hp.toFixed(0)})`);
+  check(H.msgs('fx').some((f) => f.k === 'thud'), 'thud');
+  victim.v = 0;
+  H.exit(1);
+  H.exit(0);
+  check(p.car == null && P(1).car == null, 'F gets you out');
+  check(victim.ai && victim.ai.mode === 'park', 'and the car stays put');
+  // set a car on fire: it burns, then goes up and takes you with it
+  const parked = [...m.cars.values()].filter((c) => c.parkedSpot != null).sort((a, b) => dist(a, P(1)) - dist(b, P(1)))[0] || victim;
+  const front = { x: parked.x + Math.sin(parked.h) * 6, z: parked.z + Math.cos(parked.h) * 6 };
+  H.go(1, front.x, front.z);
+  m.giveWeapon(P(1), 'smg', 240);
+  let shots = 0;
+  while (parked.hp > 0 && shots < 200) { H.go(1, front.x, front.z); H.shoot(1, parked.x, 0.8, parked.z, 2); H.step(0.12); shots++; }
+  check(parked.fire, `a shot-up car catches fire (${shots} shots)`);
+  H.go(1, parked.x + Math.sin(parked.h) * 3.5, parked.z + Math.cos(parked.h) * 3.5);
+  const hp = P(1).hp;
+  H.step(5);
+  check(parked.dead, 'and explodes');
+  check(H.msgs('fx').some((f) => f.k === 'boom'), 'boom');
+  check(P(1).hp < hp || P(1).state === 'wasted', 'too close hurts');
+  H.go(0, parked.x + 1, parked.z + 1);
+  H.st(0);
+  m.handle(p.id, { t: 'enter', car: parked.id });
+  check(p.car == null, "you can't drive a wreck");
 }
-console.log('night: wrong first answer');
-night(2, 'wrong-d', { wrong: true });
-console.log('mannequins');
-mannequinRules('mq-e');
-console.log('the thing in the uniform');
-stalkerHunts('sk-f');
-console.log('everyone taken');
-allTaken('taken-g');
-console.log(`${failures ? `${failures} FAILED` : 'all passed'} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
-void HOUR_LEN;
-process.exit(failures ? 1 : 0);
+
+// ------------------------------------------------------ guns, pickups, shop
+{
+  console.log('pickups and the gun shop');
+  const H = setup(1, 'shop');
+  const { m, P } = H;
+  const p = P(0);
+  // a tape
+  const tape = [...m.pickups.values()].find((k) => k.kind === 'tape');
+  const before = p.money;
+  H.go(0, tape.x, tape.z);
+  H.step(0.3);
+  check(!m.pickups.has(tape.id), 'walk into a tape to take it');
+  check(p.money === before + TAPE_PAY, 'tapes pay');
+  check(H.msgs('save').length >= 1 && H.msgs('save').pop().data.tapes.includes(tape.tape), 'and save the game');
+  // health
+  p.hp = 30;
+  const hk = [...m.pickups.values()].find((k) => k.kind === 'health');
+  H.go(0, hk.x, hk.z);
+  H.step(0.3);
+  check(p.hp === MAX_HP, 'health pickups heal');
+  check(hk.gone, 'and come back later');
+  // the gun shop
+  const G = PLACES.guns;
+  H.go(0, G.x, G.z);
+  p.money = 1000;
+  m.handle(p.id, { t: 'buy', item: 'pistol' });
+  check(p.ammo[1] === WEAPONS[1].ammo && p.money === 1000 - WEAPONS[1].price, 'buy a pistol');
+  m.handle(p.id, { t: 'buy', item: 'pistol' });
+  check(p.ammo[1] === WEAPONS[1].ammo * 2 && p.money === 1000 - WEAPONS[1].price - WEAPONS[1].ammoPrice, 'then ammo for it');
+  m.handle(p.id, { t: 'buy', item: 'shotgun' });
+  check(p.ammo[3] === -1, "you can't buy what you can't afford");
+  check(H.msgs('shop').some((s) => s.ok === false), 'the shop says so');
+  m.handle(p.id, { t: 'buy', item: 'armor' });
+  check(p.armor === 100, 'body armour');
+  H.go(0, 0, 0);
+  p.money = 5000;
+  m.handle(p.id, { t: 'buy', item: 'smg' });
+  check(p.ammo[2] === -1, 'only at the counter');
+  // reloads
+  p.w = 1;
+  const clip = p.clip[1];
+  for (let k = 0; k < clip; k++) { H.shoot(0, 0, 1, 20, 1); m.t += 0.5; }
+  check(H.msgs('reload').length === 1, `a clip of ${clip} then a reload`);
+  // a punch
+  const ped = [...m.peds.values()].find((q) => q.kind === 'civ') || null;
+  if (ped) {
+    H.go(0, ped.x, ped.z - 1); p.h = 0; ped.vx = 0; ped.vz = 0;
+    const hp0 = ped.hp;
+    m.punch(p);
+    check(ped.hp < hp0, 'fists hurt');
+  }
+}
+
+// ------------------------------------------------------ saving and continuing
+{
+  console.log('continuing a saved game');
+  const H = setup(1, 'saved', { save: { done: 3, money: 999, ammo: [0, 30, -1, -1], tapes: [0, 1, 2] } });
+  const { m, P } = H;
+  check(m.missions.done === 3, 'jobs done are remembered');
+  check(m.missions.next.id === 'm4', 'the next job is offered');
+  check(P(0).money === 999 && P(0).ammo[1] === 30 && P(0).ammo[2] === -1, 'money and guns are remembered');
+  check([...m.pickups.values()].filter((k) => k.kind === 'tape').length === TAPES.length - 3, 'tapes found stay found');
+  // walking into your place saves
+  H.go(0, PLACES.safehouse.x, PLACES.safehouse.z);
+  H.clear();
+  H.step(0.5);
+  check(H.banners().includes('GAME SAVED'), 'walk into your place to save');
+  check(H.msgs('save').pop()?.data.done === 3, 'the save says where you are');
+}
+
+// ------------------------------------------------------ co-op
+{
+  console.log('co-op');
+  const H = setup(4, 'coop');
+  const { m } = H;
+  H.step(1);
+  check(m.players.length === 4, 'four players');
+  check(H.msgs('s').pop().p.length === 4, 'everyone in the snapshot');
+  m.leave('p3');
+  check(m.players.length === 3 && !m.over, 'one leaves, the game goes on');
+  for (const id of ['p1', 'p2', 'p4']) m.leave(id);
+  check(m.over, 'everyone leaves: it ends');
+}
+
+// ------------------------------------------------------ every job
+{
+  console.log('every job, start to finish (two players)');
+  const H = setup(2, 'story', { immortal: true });
+  const { m, P } = H;
+  const p = P(0);
+  const A = () => m.missions.active;
+  const stepIs = (what) => A() && A().def.steps[A().idx]?.do === what;
+  const car = (id) => m.cars.get(A().cars[id]);
+  // talk through any dialogue
+  const talk = () => { for (let k = 0; k < 40 && stepIs('say'); k++) { m.handle('p2', { t: 'skip' }); H.step(0.2); } };
+  // (and one tick more, so the step has begun)
+  const untilStep = (what, sec = 20) => { for (let k = 0; k < sec / 0.1 && A() && !stepIs(what); k++) H.step(0.1); H.step(TICK); return stepIs(what); };
+  const cool = () => { for (const q of m.players) m.police.clear(q, 'test'); };
+  const startNext = () => {
+    for (const q of m.players) if (q.car != null) H.exit(q.idx);
+    cool();
+    H.step(7);
+    cool();
+    // (standing on the next one's marker already starts it)
+    const mk = m.missions.marker();
+    if (mk) { H.go(0, mk.x, mk.z); H.step(0.5); }
+    check(!!A(), `job ${m.missions.done + 1} starts at the marker`);
+    check(H.msgs('mission').pop()?.active, 'the HUD is told');
+    talk();
+  };
+  let credits = 0;
+  const passed = (title) => {
+    const ok = !A() && H.banners().includes('MISSION PASSED');
+    check(ok, `${title} passed`);
+    if (!ok) console.log('   state:', A()?.def.title, A()?.idx, A()?.def.steps[A()?.idx]?.do, A()?.text, H.banners().slice(-3));
+    credits += H.msgs('credits').length;
+    H.clear();
+  };
+  const mBlip = () => H.msgs('mission').pop()?.blips || [];
+  const drain = (sec) => H.step(sec);
+  let money;
+
+  // 1. Night Work: fetch a car
+  money = p.money;
+  startNext();
+  check(stepIs('enter'), 'job 1: get in the car');
+  check(mBlip().some((b) => b.k === 'car'), 'the car is on the radar');
+  H.enter(0, car('repo'));
+  H.step(0.3);
+  check(stepIs('deliver'), 'job 1: deliver it');
+  H.driveTo(0, 152, 64);
+  H.step(0.5);
+  talk();
+  drain(0.3);
+  passed('Night Work');
+  check(p.money === money + MISSIONS[0].pay && P(1).money >= MISSIONS[0].pay, 'everyone is paid');
+
+  // 2. Repo Man: steal a car with an alarm, get it resprayed
+  startNext();
+  H.enter(0, car('kestrel'));
+  H.step(0.3);
+  untilStep('lose', 6);
+  check(p.wanted >= 2, 'the alarm brings two stars');
+  const S = PLACES.spray;
+  money = p.money;
+  H.driveTo(0, (S.x0 + S.x1) / 2, (S.z0 + S.z1) / 2);
+  H.step(1);
+  check(p.wanted === 0, 'Spray-N-Go loses the police');
+  check(p.money === money - PRICES.respray, 'for a price');
+  untilStep('deliver', 4);
+  H.driveTo(0, 152, 64);
+  H.step(0.5);
+  talk();
+  drain(0.3);
+  passed('Repo Man');
+
+  // 3. Collections: a gunfight, then the money
+  startNext();
+  untilStep('goto', 6);
+  check(p.ammo[1] >= 48, 'Voss gives you a pistol');
+  const pool = A().def.steps[A().idx].at;
+  H.go(0, pool.x, pool.z + 4);
+  H.go(1, pool.x + 2, pool.z + 4);
+  untilStep('kill', 5);
+  const gang = A().groups.brill.map((id) => m.peds.get(id));
+  check(gang.length === 4, "Brill's crew");
+  check(mBlip().filter((b) => b.k === 'enemy').length === 4, 'on the radar');
+  for (let k = 0; k < 400 && stepIs('kill'); k++) {
+    const g = gang.find((q) => q && !q.dead);
+    if (!g) break;
+    H.go(0, g.x + 3, g.z);
+    H.shoot(0, g.x, 1.2, g.z, 1);
+    H.step(0.3);
+    p.ammo[1] = Math.max(p.ammo[1], 20);
+  }
+  check(gang.every((q) => q.dead), 'they all go down');
+  untilStep('pickup', 3);
+  const bag = m.pickups.get(A().pickups.bag);
+  check(!!bag, 'the boss drops the money');
+  H.go(1, bag.x, bag.z);
+  H.step(0.5);
+  check(stepIs('goto'), 'a friend can pick it up');
+  cool();
+  H.go(0, PLACES.voss.x, PLACES.voss.z);
+  H.step(0.5);
+  talk();
+  drain(0.3);
+  passed('Collections');
+
+  // 4. Wheelman: the getaway
+  startNext();
+  H.enter(0, car('getaway'));
+  H.step(0.3);
+  check(stepIs('goto'), 'job 4: drive to the store');
+  H.driveTo(0, 124.9, -80, Math.PI);
+  H.step(0.5);
+  untilStep('board', 6);
+  check(stepIs('board'), 'the crew comes out');
+  untilStep('deliver', 25);
+  const crew = A().groups.crew.map((id) => m.peds.get(id));
+  check(crew.every((q) => q && q.inCar === car('getaway').id), 'they get in');
+  check(p.wanted >= 3, 'three stars');
+  H.driveTo(0, PLACES.pier.x, PLACES.pier.z);
+  H.step(0.5);
+  talk();
+  drain(0.5);
+  passed('Wheelman');
+  check(crew.every((q) => !q || q.inCar == null), 'the crew gets out');
+
+  // 5. Checkpoint: the race
+  startNext();
+  H.enter(0, car('racer'));
+  H.step(0.3);
+  check(stepIs('race'), 'job 5: race');
+  check(H.msgs('countdown').length === 1, 'a countdown');
+  const racers = () => A().s.racers.map((id) => m.cars.get(id));
+  H.step(16);
+  const progress = Math.max(...racers().map((r) => r.ai.raceIdx));
+  const raceDist = Math.max(...racers().map((r) => dist(r, car('racer'))));
+  console.log(`  the other racers made ${progress} checkpoints in 12 s (${raceDist.toFixed(0)} m away)`);
+  check(progress >= 1, 'the other racers race');
+  for (const [x, z] of A().def.steps[A().idx].points) { H.driveTo(0, x, z); H.step(0.2); }
+  untilStep('say', 2);
+  talk();
+  drain(0.3);
+  passed('Checkpoint');
+
+  // 6. Convoy: burn two vans
+  startNext();
+  untilStep('destroy', 6);
+  check(p.ammo[2] >= 120, 'an SMG');
+  const vans = ['van1', 'van2'].map(car);
+  H.step(3);
+  check(vans.every((v) => Math.hypot(v.x - A().def.steps[2].at[vans.indexOf(v)].x, v.z - A().def.steps[2].at[vans.indexOf(v)].z) > 3), 'the vans drive');
+  for (let k = 0; k < 600 && stepIs('destroy'); k++) {
+    const v = vans.find((q) => !q.dead && !q.fire) || vans.find((q) => !q.dead);
+    if (!v) break;
+    H.go(0, v.x + 6, v.z + 6);
+    H.shoot(0, v.x, 0.8, v.z, 2);
+    p.ammo[2] = Math.max(p.ammo[2], 60);
+    H.step(0.12);
+  }
+  check(vans.every((v) => v.dead), 'both vans burn');
+  cool();
+  H.step(0.5);
+  talk();
+  drain(0.3);
+  passed('Convoy');
+
+  // 7. Thirteen
+  startNext();
+  check(stepIs('goto'), 'job 7: the pier');
+  H.go(0, PLACES.pier.x, PLACES.pier.z);
+  untilStep('pickup', 3);
+  const mq = A().groups.mq.map((id) => m.peds.get(id));
+  check(mq.length === 9 && mq.every((q) => q && m.openAt(q.x, q.z, 0.3)), 'nine of them among the containers');
+  const crate = m.pickups.get(A().pickups.crate);
+  H.go(0, crate.x, crate.z);
+  H.step(0.5);
+  check(p.carry === 'crate', 'you carry the crate');
+  H.go(0, PLACES.ruins.x, PLACES.ruins.z);
+  H.step(0.5);
+  check(stepIs('target'), 'put it down at the old mall');
+  const box = m.objects.get(A().objects.crate);
+  check(!!box, 'the crate is there');
+  H.go(0, box.x + 4, box.z);
+  for (let k = 0; k < 60 && stepIs('target'); k++) { H.shoot(0, box.x, 0.6, box.z, 1); p.ammo[1] = Math.max(p.ammo[1], 20); H.step(0.35); }
+  check(!m.objects.has(box.id), 'and smash it');
+  H.step(0.3);
+  check(mq.every((q) => q.dead), 'they all fall');
+  talk();
+  drain(0.5);
+  passed('Thirteen');
+  check(m.missions.done === MISSIONS.length, 'every job done');
+  check(credits === 1, 'the credits roll');
+  check(!m.missions.marker(), 'no more jobs');
+}
+
+// ------------------------------------------------------ a job can fail
+{
+  console.log('failing a job');
+  const H = setup(1, 'fail', { immortal: false });
+  const { m, P } = H;
+  const mk = m.missions.marker();
+  H.go(0, mk.x, mk.z);
+  H.step(0.5);
+  for (let k = 0; k < 40 && m.missions.active?.def.steps[m.missions.active.idx]?.do === 'say'; k++) { m.handle('p1', { t: 'skip' }); H.step(0.2); }
+  const c = m.cars.get(m.missions.active.cars.repo);
+  m.hurtCar(c, 999, P(0));
+  H.step(6);
+  check(!m.missions.active && H.banners().includes('MISSION FAILED'), 'wreck the car, fail the job');
+  check(m.missions.done === 0, 'and do it again');
+  H.go(0, mk.x + 20, mk.z);
+  H.step(8);
+  check(!!m.missions.marker(), 'the marker comes back');
+  H.go(0, mk.x, mk.z);
+  H.step(0.5);
+  check(m.missions.active?.def.id === 'm1', 'and starts it again');
+}
+
+if (failures) { console.log(`\n${failures} check(s) failed`); process.exit(1); }
+console.log('\nall good');

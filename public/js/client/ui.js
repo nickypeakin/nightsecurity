@@ -1,35 +1,40 @@
 // The heads-up display and the menu screens.
 
+import { WEAPONS, PRICES } from '../shared/config.js';
+import { SHOP } from '../shared/story.js';
+
 const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-export const COLORS = ['#c9493a', '#5a8fc8', '#5a9a52', '#d0a030'];
+export const COLORS = ['#e05a4a', '#5a9ae0', '#5ac06a', '#e0b040'];
 
-// hours as a clock: 22.5 is 10:30 PM, 26.25 is 2:15 AM
-export function clockText(h, seconds = false) {
-  h = ((h % 24) + 24) % 24;
-  const hh = Math.floor(h), mm = Math.floor((h % 1) * 60), ss = Math.floor(((h * 60) % 1) * 60);
-  return `${hh % 12 || 12}:${String(mm).padStart(2, '0')}${seconds ? `:${String(ss).padStart(2, '0')}` : ''} ${hh >= 12 ? 'PM' : 'AM'}`;
+// "~y~yellow~w~ text" (the colour codes the jobs use) as HTML
+export function colorize(text) {
+  const C = { y: 'y', b: 'b', r: 'r', g: 'g', w: '' };
+  let out = '', open = false;
+  for (const part of String(text || '').split(/(~[a-z]~)/)) {
+    const m = /^~([a-z])~$/.exec(part);
+    if (m) { if (open) out += '</span>'; open = !!C[m[1]]; if (open) out += `<span class="${C[m[1]]}">`; } else out += esc(part);
+  }
+  return open ? `${out}</span>` : out;
 }
 
 export class Hud {
   constructor() {
     this.root = $('hud');
     this.last = {};
-    this.cardTimers = [];
+    this.timers = new Map();
   }
 
-  show() { this.root.hidden = false; this.banner(null); }
+  show() { this.root.hidden = false; }
   hide() { this.root.hidden = true; }
 
-  // cutscenes show only subtitles, the title card and the skip hint
+  // cutscenes: black bars, and only the subtitles
   cinematic(on) { this.root.classList.toggle('cinematic', on); }
-  // on the cameras: only the camera's own overlay
-  cctv(on) { this.root.classList.toggle('cctv', on); $('camOverlay').hidden = !on; }
 
   set(id, text) {
     if (this.last[id] === text) return;
     this.last[id] = text;
-    $(id).textContent = text || '';
+    $(id).textContent = text ?? '';
   }
   html(id, html) {
     if (this.last[id] === html) return;
@@ -37,116 +42,111 @@ export class Hud {
     $(id).innerHTML = html;
   }
 
-  // one or two lines under the crosshair: [E] ..., [R] ...
-  prompt(text, second = null) {
-    this.html('prompt', text ? `${esc(text)}${second ? `<small>${esc(second)}</small>` : ''}` : '');
+  money(n) { this.set('money', `$${String(Math.max(0, n | 0)).padStart(8, '0')}`); }
+  clock(text) { this.set('clock', text); }
+  health(hp, armor) {
+    const w = (v) => `${Math.round(Math.max(0, Math.min(100, v)))}%`;
+    if (this.last.hp !== hp) { this.last.hp = hp; $('hpBar').style.width = w(hp); $('hpBar').parentElement.classList.toggle('low', hp < 30); }
+    if (this.last.armor !== armor) { this.last.armor = armor; $('armorBar').style.width = w(armor); $('armorBar').parentElement.hidden = armor <= 0; }
   }
-  clock(h, label) { this.set('clock', h == null ? '' : clockText(h)); this.set('dayName', label || ''); }
-  hint(text) { this.set('hint', text); }
-
-  // [{ id, text, n, of, done, optional }]
-  objectives(list, flashId = null) {
-    const html = (list || []).map((o) => {
-      const count = o.of > 1 ? ` <span class="n">${Math.min(o.n, o.of)}/${o.of}</span>` : '';
-      return `<li class="${o.done ? 'done' : ''} ${o.optional ? 'opt' : ''} ${o.id === flashId ? 'flash' : ''}">${esc(o.text)}${count}</li>`;
-    }).join('');
-    this.html('objectives', html);
+  weapon(w, ammo, clip, reloading) {
+    const W = WEAPONS[w];
+    const txt = W.melee ? '' : reloading ? 'RELOADING' : `${clip} / ${Math.max(0, ammo - clip)}`;
+    this.html('weapon', `<b>${esc(W.name.toUpperCase())}</b><span>${esc(txt)}</span>`);
   }
+  // stars: how many, and whether they're flashing (the police have lost you)
+  wanted(n, searching) {
+    const key = `${n}:${searching}`;
+    if (this.last.wanted === key) return;
+    this.last.wanted = key;
+    const el = $('wanted');
+    el.innerHTML = [0, 1, 2, 3, 4].map((k) => `<i class="${k < n ? 'on' : ''}">★</i>`).join('');
+    el.classList.toggle('flash', !!searching && n > 0);
+    el.classList.toggle('none', n === 0);
+  }
+  mission(text) { this.html('mission', colorize(text)); }
+  help(text) { this.html('help', text ? colorize(text) : ''); $('help').hidden = !text; }
+  crosshair(on, hit = false) { $('cross').hidden = !on; $('cross').classList.toggle('hit', hit); }
 
-  meter(id, v) {
+  // a name (an area, a car) shown for a few seconds
+  fleeting(id, text, sec = 3.5) {
     const el = $(id);
-    el.hidden = v == null;
-    if (v == null) return;
-    const w = `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
-    if (this.last[id] !== w) { this.last[id] = w; el.querySelector('i').style.width = w; }
-    el.classList.toggle('low', v < 0.3);
+    el.textContent = text;
+    el.classList.remove('on');
+    void el.offsetWidth;
+    el.classList.add('on');
+    clearTimeout(this.timers.get(id));
+    this.timers.set(id, setTimeout(() => el.classList.remove('on'), sec * 1000));
   }
+  area(name) { this.fleeting('area', name, 4); }
+  carName(name) { this.fleeting('carName', name, 3); }
 
-  stamina(v) { this.meter('staminaMeter', v); }
-  flashlight(on) { $('flashicon').classList.toggle('on', !!on); }
-  crosshair(on) { $('cross').hidden = !on; }
-
-  team(list) {
-    const html = list.map((p) => `<li class="${p.me ? 'me' : ''} ${p.out ? 'out' : ''}" style="--c:${COLORS[p.color % 4]}">${esc(p.name)}${p.where ? ` <span>${esc(p.where)}</span>` : ''}</li>`).join('');
-    this.html('team', html);
-  }
-
-  // a line of dialogue. kind: '' (someone near), 'radio', 'ch2', 'pa', 'creepy'
-  say(name, text, kind = '') {
+  // a line of dialogue
+  say(name, text, kind = '', dur = 4) {
     const d = document.createElement('div');
     if (kind) d.className = kind;
     d.innerHTML = name ? `<b>${esc(name)}</b> ${esc(text)}` : esc(text);
     const box = $('subs');
     box.appendChild(d);
-    while (box.children.length > 3) box.firstChild.remove();
-    setTimeout(() => d.remove(), 4200 + text.length * 50);
+    while (box.children.length > 2) box.firstChild.remove();
+    setTimeout(() => d.remove(), dur * 1000 + 600);
   }
+  clearSubs() { $('subs').innerHTML = ''; }
 
-  toast(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    const box = $('toasts');
-    box.appendChild(d);
-    while (box.children.length > 3) box.firstChild.remove();
-    setTimeout(() => d.remove(), 5600);
-  }
-
-  flash(text) {
-    const f = $('flash');
-    f.textContent = text;
-    f.classList.remove('on');
-    void f.offsetWidth;
-    f.classList.add('on');
-  }
-
-  banner(title, sub) {
+  // the big words: MISSION PASSED, WASTED, BUSTED
+  banner(text, sub = '', kind = '') {
     const b = $('banner');
-    b.hidden = !title;
-    if (title) {
-      b.querySelector('h1').textContent = title;
-      b.querySelector('p').textContent = sub || '';
-    }
+    clearTimeout(this.timers.get('banner'));
+    if (!text) { b.hidden = true; return; }
+    b.hidden = false;
+    b.className = kind;
+    b.querySelector('h1').textContent = text;
+    b.querySelector('p').textContent = sub || '';
+    b.classList.remove('on');
+    void b.offsetWidth;
+    b.classList.add('on');
+    this.timers.set('banner', setTimeout(() => { b.hidden = true; }, kind === 'wasted' || kind === 'busted' ? 5500 : 4000));
   }
 
-  // a full-screen panel over the game (walkie, logbook, map, notes...)
-  panel(html, cls = '') {
-    const p = $('panel');
-    p.hidden = !html;
-    p.className = cls;
-    if (html) p.innerHTML = html;
-  }
-  get panelOpen() { return !$('panel').hidden; }
-
-  // the camera feed's overlay
-  camOverlay(cam, n, clock, rec) {
-    this.html('camOverlay', `<div class="tl">CAM ${n} · ${esc(cam)}</div><div class="tr">${esc(clockText(clock, true))}<br>10/${clock >= 24 ? 25 : 24}/96</div><div class="bl">${rec ? '<span class="rec">●</span> REC' : 'NO SIGNAL'}</div><div class="br">[A]/[D] or [1]-[8] switch camera · [E] step back</div>`);
+  countdown(n) {
+    const el = $('countdown');
+    el.hidden = n == null;
+    if (n != null) { el.textContent = n; el.classList.remove('on'); void el.offsetWidth; el.classList.add('on'); }
   }
 
-  // the hour, big, then gone
-  card(title, sub, dur = 4) {
-    const c = $('card');
-    for (const t of this.cardTimers) clearTimeout(t);
-    this.cardTimers = [];
-    if (!title) { c.hidden = true; return; }
-    c.hidden = false;
-    c.querySelector('h1').textContent = title;
-    c.querySelector('h2').textContent = sub || '';
-    c.classList.remove('on');
-    void c.offsetWidth;
-    c.classList.add('on');
-    this.cardTimers.push(setTimeout(() => { c.hidden = true; }, dur * 1000));
+  // hurt: the edges go red for a moment
+  hurt(k) {
+    const f = $('hurt');
+    f.style.opacity = Math.min(0.85, 0.25 + k / 60);
+    clearTimeout(this.timers.get('hurt'));
+    this.timers.set('hurt', setTimeout(() => { f.style.opacity = 0; }, 160));
+  }
+
+  // the gun shop counter
+  shop(open, money = 0, ammo = [], armor = 0, msg = '') {
+    const el = $('shop');
+    el.hidden = !open;
+    if (!open) return;
+    const rows = SHOP.map((s, i) => {
+      if (s.armor) return `<button data-buy="${s.key}" ${money < PRICES.armor || armor >= 100 ? 'disabled' : ''}><span>${i + 1}. ${esc(s.label)}</span><span>$${PRICES.armor}</span></button>`;
+      const k = WEAPONS.findIndex((w) => w.key === s.weapon);
+      const W = WEAPONS[k];
+      const owned = ammo[k] >= 0;
+      const price = owned ? W.ammoPrice : W.price;
+      return `<button data-buy="${s.key}" ${money < price ? 'disabled' : ''}><span>${i + 1}. ${esc(owned ? `${s.label} ammo` : s.label)}</span><span>$${price}</span></button>`;
+    }).join('');
+    el.innerHTML = `<h2>KINGSGATE ARMS</h2><p class="sub">Cash: $${money}</p>${rows}<p class="msg">${esc(msg)}</p><p class="small">Click or press 1-4 to buy · E or Esc to leave</p>`;
   }
 
   reset() {
     this.last = {};
     this.cinematic(false);
-    this.cctv(false);
-    for (const id of ['prompt', 'clock', 'dayName', 'hint']) $(id).textContent = '';
-    for (const id of ['subs', 'toasts', 'team', 'objectives']) $(id).innerHTML = '';
-    $('staminaMeter').hidden = true;
-    this.panel(null);
-    this.card(null);
+    for (const id of ['subs', 'mission', 'weapon']) $(id).innerHTML = '';
     this.banner(null);
+    this.help(null);
+    this.countdown(null);
+    this.shop(false);
+    $('mapScreen').hidden = true;
   }
 }
 
@@ -166,37 +166,12 @@ export function renderLobby(msg, myId) {
   const slots = [];
   for (let i = 0; i < 4; i++) {
     const p = msg.players[i];
-    if (p) slots.push(`<li style="--c:${COLORS[p.color % 4]}"><span>${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span><span>${p.id === msg.hostId ? 'HOST' : 'ON SHIFT'}</span></li>`);
+    if (p) slots.push(`<li style="--c:${COLORS[p.color % 4]}"><span>${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span><span>${p.id === msg.hostId ? 'HOST' : 'READY'}</span></li>`);
     else slots.push('<li class="empty"><span>Empty</span><span>-</span></li>');
   }
   $('slots').innerHTML = slots.join('');
   $('startBtn').hidden = !amHost;
-  $('lobbyWait').textContent = amHost ? '' : 'Waiting for the host to clock in...';
-}
-
-const FATE = { survived: 'MADE IT TO SIX', taken: 'TAKEN', gone: 'LEFT' };
-export function renderResults(over, myId, amHost) {
-  $('resultHead').textContent = over.title;
-  $('resultLines').innerHTML = over.lines.map((l) => `<p>${esc(l)}</p>`).join('');
-  $('resultList').innerHTML = over.results.map((r) =>
-    `<li class="${r.st}" style="--c:${COLORS[r.color % 4]}"><span>${esc(r.name)}${r.id === myId ? ' (you)' : ''}</span><span>${FATE[r.st] || ''}${r.st === 'taken' && r.time != null ? ` · ${clockText(r.time)}` : ''}</span></li>`).join('');
-  const S = over.stats;
-  if (S) {
-    const dale = S.dale === 'safe' ? 'found, and safe in the office' : S.dale === 'found' ? 'found' : `not found (he was in ${S.place})`;
-    const rep = S.report == null ? 'not filed' : `${S.report} of 3 right`;
-    $('resultStats').innerHTML = `
-      <div class="grade">${esc(S.grade)}</div>
-      <table>
-        <tr><td>Locked at six</td><td>${S.locked} of ${S.lockTotal}</td></tr>
-        <tr><td>Clock stations punched</td><td>${S.punches} of ${S.punchTotal}</td></tr>
-        <tr><td>What you found out</td><td>${S.clues} of ${S.clueTotal}</td></tr>
-        <tr><td>Dale Mercer</td><td>${esc(dale)}</td></tr>
-        <tr><td>Incident report</td><td>${esc(rep)}</td></tr>
-      </table>`;
-  } else $('resultStats').innerHTML = '';
-  $('againBtn').hidden = !amHost;
-  $('toLobbyBtn').hidden = !amHost;
-  $('resultWait').textContent = amHost ? '' : 'Waiting for the host...';
+  $('lobbyWait').textContent = amHost ? '' : 'Waiting for the host to start...';
 }
 
 // cls: 'good' or 'bad' to colour the message

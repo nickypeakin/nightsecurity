@@ -13,11 +13,13 @@ function intervalTicker(fn, ms) {
 
 export class Lobby {
   // ticker(fn, ms) calls fn every ms milliseconds and returns a stop function
-  // startAt: which part of the story to begin at (for testing)
-  constructor({ code = null, ticker = intervalTicker, startAt = 0 } = {}) {
+  // startAt: 'skip' skips the opening (for testing); save: the host's saved
+  // progress, if any
+  constructor({ code = null, ticker = intervalTicker, startAt = 0, save = null } = {}) {
     this.code = code;
     this.ticker = ticker;
     this.startAt = startAt;
+    this.save = save;
     this.members = [];       // people: { id, name, color, deliver }
     this.hostId = null;
     this.match = null;
@@ -56,8 +58,6 @@ export class Lobby {
     if (!m) return;
     if (msg.t === 'start' && id === this.hostId && !(this.match && !this.match.over)) {
       this.start();
-    } else if (msg.t === 'skip' && id === this.hostId) {
-      if (this.match) this.match.skipIntro();
     } else if (msg.t === 'tolobby' && id === this.hostId) {
       this.stopMatch();
       this.sendLobby();
@@ -82,7 +82,8 @@ export class Lobby {
     this.stopMatch();
     const roster = this.members.map((m) => ({ id: m.id, name: m.name, color: m.color }));
     const seed = Math.random().toString(36).slice(2, 10);
-    this.match = new Match({ seed, roster, send: (to, msg) => this.send(to, msg), start: this.startAt });
+    this.match = new Match({ seed, roster, send: (to, msg) => this.send(to, msg), start: this.startAt, save: this.save });
+    if (typeof location !== 'undefined' && location.search.includes('autotest')) globalThis.__match = this.match;   // for browser tests
     this.send(null, { t: 'start', seed, roster, host: this.hostId, startAt: this.startAt });
     let last = performance.now(), acc = 0;
     this.stopTicker = this.ticker(() => {

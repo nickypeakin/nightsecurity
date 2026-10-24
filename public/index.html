@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Night Security · Kingsgate Mall</title>
-  <meta name="description" content="A co-op horror game in your browser. Work the night shift at Kingsgate Mall: lock every gate, punch every clock, watch the cameras, and find out what happened to the last guard. The mannequins only move when nobody is looking.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230c0e12'/%3E%3Cpath d='M12 56 V22 L32 10 L52 22 V56 Z' fill='%23232a33'/%3E%3Cpath d='M18 56 V30 H46 V56' fill='none' stroke='%23b8bcc0' stroke-width='2'/%3E%3Cpath d='M18 36 H46 M18 42 H46 M18 48 H46' stroke='%238a8e92' stroke-width='1.5'/%3E%3Ccircle cx='32' cy='22' r='4' fill='%23ffd070'/%3E%3C/svg%3E">
+  <title>Kingsgate Nights</title>
+  <meta name="description" content="An open-world crime game in your browser, for up to four friends. Steal cars, outrun the police, take jobs from the people who run the city of Kingsgate, all night long.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23080a12'/%3E%3Cpath d='M8 56V30h8v26M20 56V14h12v42M36 56V24h10v32M50 56V36h6v20' fill='%23232a3a'/%3E%3Cpath d='M22 20h3v3h-3zM27 26h3v3h-3zM38 30h3v3h-3zM22 34h3v3h-3z' fill='%23ffc060'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/bebas-neue/latin-400.css">
   <link rel="stylesheet" href="vendor/special-elite/latin-400.css">
   <link rel="stylesheet" href="vendor/inter/latin-400.css">
   <link rel="stylesheet" href="vendor/inter/latin-600.css">
@@ -19,36 +20,47 @@
   <canvas id="gl"></canvas>
 
   <div id="hud" hidden>
-    <ul id="objectives"></ul>
-    <div id="clockBox"><div id="clock"></div><small id="dayName"></small></div>
-    <ul id="team"></ul>
-    <div id="toasts"></div>
-    <div id="cross"></div>
-    <div id="prompt"></div>
-    <div id="subs"></div>
-    <div id="flash"></div>
-    <div id="banner" hidden><h1></h1><p></p></div>
-    <div id="hint"></div>
-    <div id="meters">
-      <div class="meter" id="staminaMeter" hidden><label>STAMINA</label><div class="bar"><i></i></div></div>
-      <div id="flashicon">FLASHLIGHT</div>
+    <div id="hurt"></div>
+    <div id="radarWrap">
+      <canvas id="radar"></canvas>
+      <div class="bars">
+        <div class="bar hp"><i id="hpBar"></i></div>
+        <div class="bar armor" hidden><i id="armorBar"></i></div>
+      </div>
     </div>
-    <div id="camOverlay" hidden></div>
-    <div id="panel" hidden></div>
-    <div id="card" hidden><h1></h1><h2></h2></div>
+    <div id="topRight">
+      <div id="clock"></div>
+      <div id="weapon"></div>
+      <div id="money"></div>
+      <div id="wanted" class="none"></div>
+    </div>
+    <div id="help" hidden></div>
+    <div id="area"></div>
+    <div id="carName"></div>
+    <div id="cross"></div>
+    <div id="mission"></div>
+    <div id="subs"></div>
+    <div id="countdown" hidden></div>
+    <div id="banner" hidden><h1></h1><p></p></div>
+    <div id="shop" hidden></div>
+    <div id="mapScreen" hidden>
+      <canvas id="mapCanvas"></canvas>
+      <p class="legend"><span class="y">●</span> job · <span class="b">●</span> car · <span class="r">●</span> target · H hospital · P police · ⌖ guns · S Spray-N-Go · ⌂ your place · M to close</p>
+    </div>
   </div>
 
   <div id="screens">
     <section id="title" class="screen">
       <div class="logo">
-        <small class="pre">KINGSGATE MALL · GRAVEYARD SHIFT</small>
-        <h1>NIGHT SECURITY</h1>
-        <p class="tag">Lock everything. Keep looking at them.</p>
+        <small class="pre">KINGSGATE · NOVEMBER 1996</small>
+        <h1>KINGSGATE<br>NIGHTS</h1>
+        <p class="tag">The mall's gone. The city's still awake.</p>
       </div>
       <div class="menu">
         <label class="field">YOUR NAME <input id="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
-        <button data-act="solo">WORK ALONE <small>one guard, ten to six</small></button>
-        <button data-act="host">HOST A SHIFT <small>play with up to 3 friends online</small></button>
+        <button data-act="continue" id="continueBtn" hidden>CONTINUE <small></small></button>
+        <button data-act="solo">NEW GAME <small>play alone</small></button>
+        <button data-act="host">HOST A GAME <small>play online with up to 3 friends</small></button>
         <label class="field">GOT A CODE FROM A FRIEND?</label>
         <div class="join">
           <input id="code" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
@@ -61,15 +73,15 @@
         </div>
         <p id="titleMsg" class="msg"></p>
       </div>
-      <p class="fine">Headphones recommended. Everything you see and hear is made in code.</p>
+      <p class="fine">Everything you see and hear is made in code. Headphones help.</p>
     </section>
 
     <section id="invite" class="screen" hidden>
-      <h2 class="head">YOU'RE ON THE ROTA</h2>
+      <h2 class="head">YOU'RE INVITED</h2>
       <p class="sub" id="inviteWho"></p>
       <div class="menu">
         <label class="field">YOUR NAME <input id="inviteName" maxlength="16" autocomplete="off" spellcheck="false"></label>
-        <button data-act="inviteJoin" id="inviteBtn" class="big">JOIN THE SHIFT</button>
+        <button data-act="inviteJoin" id="inviteBtn" class="big">JOIN THE GAME</button>
         <div class="row">
           <button class="small" data-act="nettest">TEST CONNECTION</button>
           <button class="small" data-act="leave">MAIN MENU</button>
@@ -79,7 +91,7 @@
     </section>
 
     <section id="lobby" class="screen" hidden>
-      <h2 class="head">LOCKER ROOM</h2>
+      <h2 class="head">THE CREW</h2>
       <div id="lobbyCode" class="code"></div>
       <div id="inviteBox" class="invitebox" hidden>
         <p>Send your friends this link. It takes them straight to your lobby:</p>
@@ -88,12 +100,12 @@
           <button class="small" data-act="copy">COPY</button>
           <button class="small" data-act="share" id="shareBtn" hidden>SHARE</button>
         </div>
-        <p class="hint">Or they can open the game and type the code. Keep this tab open while you play: your browser runs the night for everyone.</p>
+        <p class="hint">Or they can open the game and type the code. Keep this tab open while you play: your browser runs the city for everyone.</p>
       </div>
       <p id="lobbyMsg" class="msg"></p>
       <ol id="slots"></ol>
       <div class="row center">
-        <button data-act="start" id="startBtn">CLOCK IN</button>
+        <button data-act="start" id="startBtn">START</button>
         <button class="small" data-act="leave">LEAVE</button>
       </div>
       <p id="lobbyWait" class="msg"></p>
@@ -102,24 +114,22 @@
     <section id="help" class="screen" hidden>
       <h2 class="head">HOW TO PLAY</h2>
       <div class="text">
-        <p>October 1996. <b>Kingsgate Mall</b> closes for good next week, and Gatehouse Security has put you on the night shift: ten at night to six in the morning. The last night guard, Dale Mercer, stopped coming in on Tuesday. His car is still in the lot.</p>
-        <p><b>Lock everything.</b> Pull the shop gates down and padlock them, lock the outside doors. The <b>alarm panel</b> in the security office (and your map) shows what's open. Things you locked won't always stay locked. <b>Walk the rounds</b>: turn the key in all six clock stations, every round.</p>
-        <p><b>Find out what's happening.</b> Read Dale's logbook. Look at what he left behind. Your notes fill in as you go, and at six you'll file an incident report: get it right.</p>
-        <p><b>The mannequins only move when nobody can see them.</b> Not in anyone's view, not in a flashlight beam, not on the camera someone in the office is watching. In the dark you can't see them, so they can move. A locked gate stops them. An unlocked one doesn't. Don't all look away at once.</p>
-        <p>From one in the morning, <b>something in Dale's uniform</b> walks his round with his keys. If it sees you it comes for you. Run, break its line of sight, hide, or shine your flashlight full in its face.</p>
+        <p>November 1996. <b>Kingsgate Mall</b> is a fenced-off pile of rubble, and the night shift that used to guard it is out of work. The city's still awake, and some of the people who run it have jobs for somebody who doesn't scare easily.</p>
+        <p><b>Take jobs.</b> Walk into the big letter on the radar (and the glowing ring on the street) to start one. Ray Okafor sells used cars; Lena Voss runs the harbour; Dale Mercer, the old night guard, has one last thing for you.</p>
+        <p><b>Steal cars.</b> Walk up to any car and press F, even one with somebody in it. <b>Stars</b> mean the police want you: get out of their sight until they give up, or drive into <b>Spray-N-Go</b>. If they hold on to you, you're busted.</p>
+        <p>Buy guns at <b>Kingsgate Arms</b> on the Strip. Thirteen of Kingsgate Mall's old security tapes are lost round the city. Walk into your place (⌂) to save.</p>
         <table>
-          <tr><td>WASD</td><td>walk (Shift to run, C to crouch)</td></tr>
+          <tr><td>WASD</td><td>walk / drive (Shift to sprint)</td></tr>
           <tr><td>Mouse</td><td>look</td></tr>
-          <tr><td>E</td><td>use: open, shut, pull a gate down, turn a key, read, hide</td></tr>
-          <tr><td>R</td><td>lock or unlock the gate or door you're looking at</td></tr>
-          <tr><td>F</td><td>flashlight</td></tr>
-          <tr><td>V</td><td>walkie-talkie (Gatehouse dispatch)</td></tr>
-          <tr><td>M</td><td>map: what's locked, the clock stations, everyone</td></tr>
-          <tr><td>J</td><td>notes (and, at six, the incident report)</td></tr>
-          <tr><td>1 2 3 4</td><td>shout to your friends</td></tr>
+          <tr><td>F</td><td>get in or out of a car (or steal it)</td></tr>
+          <tr><td>Right mouse</td><td>aim</td></tr>
+          <tr><td>Left mouse</td><td>shoot / punch</td></tr>
+          <tr><td>Q E, wheel, 1-4</td><td>switch weapons</td></tr>
+          <tr><td>Space</td><td>jump / handbrake / skip</td></tr>
+          <tr><td>H, G, R</td><td>horn, siren (police cars), radio</td></tr>
+          <tr><td>M</td><td>map</td></tr>
           <tr><td>Esc</td><td>pause</td></tr>
         </table>
-        <p class="small">At the monitors: A/D or 1 to 8 to switch cameras, E to step back. At the breaker panel: 1 to 6. At Dale's locker: type the combination, Enter.</p>
       </div>
       <div class="row center"><button class="small" data-act="back">BACK</button></div>
     </section>
@@ -129,7 +139,7 @@
       <div class="text">
         <label class="slider">MOUSE SENSITIVITY <input type="range" id="sens" min="0.2" max="3" step="0.05"></label>
         <label class="slider">VOLUME <input type="range" id="vol" min="0" max="1" step="0.02"></label>
-        <label class="slider">BRIGHTNESS (raise it if the lit areas look too dark) <input type="range" id="bright" min="0.6" max="2" step="0.05"></label>
+        <label class="slider">BRIGHTNESS (raise it if the streets look too dark) <input type="range" id="bright" min="0.6" max="2" step="0.05"></label>
         <label class="check"><input type="checkbox" id="invert"> Invert mouse Y</label>
         <label class="check"><input type="checkbox" id="voices"> Spoken voices (uses your browser's built-in voices; subtitles always show)</label>
         <label class="check"><input type="checkbox" id="vhs"> Old camcorder look (VHS)</label>
@@ -137,7 +147,7 @@
           <select id="graphics">
             <option value="auto">Auto (adjusts to your computer)</option>
             <option value="high">High (fast computers)</option>
-            <option value="low">Low (older laptops: no shadows or glow)</option>
+            <option value="low">Low (older laptops)</option>
           </select>
         </label>
       </div>
@@ -151,7 +161,7 @@
         <button data-act="resume">RESUME</button>
         <button class="small" data-act="help">HOW TO PLAY</button>
         <button class="small" data-act="settings">SETTINGS</button>
-        <button class="small" data-act="quit">CLOCK OUT (LEAVE)</button>
+        <button class="small" data-act="quit">QUIT TO MENU</button>
       </div>
     </section>
 
@@ -159,21 +169,8 @@
       <button data-act="resume">CLICK TO PLAY</button>
     </section>
 
-    <section id="results" class="screen" hidden>
-      <h2 class="head" id="resultHead"></h2>
-      <div id="resultLines" class="text"></div>
-      <div id="resultStats"></div>
-      <ol id="resultList"></ol>
-      <div class="row center">
-        <button data-act="again" id="againBtn">ANOTHER NIGHT</button>
-        <button class="small" data-act="tolobby" id="toLobbyBtn">BACK TO LOBBY</button>
-        <button class="small" data-act="menu">MAIN MENU</button>
-      </div>
-      <p id="resultWait" class="msg"></p>
-    </section>
-
     <section id="loading" class="screen see-through" hidden>
-      <p class="loading">Turning on the lights...</p>
+      <p class="loading">Turning on the street lights...</p>
     </section>
   </div>
   <noscript>This game needs JavaScript.</noscript>

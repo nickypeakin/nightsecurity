@@ -27,9 +27,10 @@ for (const f of ['geometries/RoundedBoxGeometry.js', 'environments/RoomEnvironme
 }
 copy(path.join(NM, 'peerjs', 'dist', 'peerjs.min.js'), path.join(OUT, 'vendor', 'peerjs.min.js'));
 
-// fonts: Special Elite (titles, typewritten notes), VT323 (the security
-// cameras and the watchclock) and Inter (everything else), latin subset only
+// fonts: Bebas Neue (the big HUD words), Special Elite (titles), VT323
+// (the dispatcher) and Inter (everything else), latin subset only
 const fonts = [
+  ['bebas-neue', 'latin-400.css', ['bebas-neue-latin-400-normal']],
   ['special-elite', 'latin-400.css', ['special-elite-latin-400-normal']],
   ['inter', 'latin-400.css', ['inter-latin-400-normal']],
   ['inter', 'latin-600.css', ['inter-latin-600-normal']],

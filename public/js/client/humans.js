@@ -44,6 +44,7 @@ function smoothSeams(geo) {
 // `arc` leaves a gap at the front (for open coats and hair); open shapes
 // get no caps.
 function loft(rings, N = 24, { arc = null, caps = true } = {}) {
+  N = lite(N, 8);
   const pos = [], uv = [], idx = [];
   const R = rings.length;
   const a0 = arc ? arc[0] : 0, a1 = arc ? arc[1] : TAU;
@@ -90,6 +91,7 @@ function loft(rings, N = 24, { arc = null, caps = true } = {}) {
 // 0 (joint) to 1 (end), rounded at both ends. `depth` squashes it
 // front-to-back.
 function limb(len, r, { depth = 1, N = 18, steps = 10, cz = 0 } = {}) {
+  steps = lite(steps, 3);
   const rings = [];
   const r0 = r(0), r1 = r(1);
   for (let k = 4; k >= 1; k--) {            // bottom cap
@@ -109,10 +111,16 @@ function limb(len, r, { depth = 1, N = 18, steps = 10, cz = 0 } = {}) {
 
 const taper = (a, b, bulge = 0, at = 0.3) => (t) => a + (b - a) * t + bulge * Math.sin(Math.PI * Math.min(1, t / (2 * at)));
 
+// Crowds use a lighter build of the same bodies: fewer segments, no
+// fingers, no eyelids. LITE is on while one of those is being built.
+let LITE = false;
+const lite = (n, min = 6) => (LITE ? Math.max(min, Math.round(n * 0.42)) : n);
+
 const geoCache = new Map();
 const cached = (key, make) => {
-  if (!geoCache.has(key)) geoCache.set(key, make());
-  return geoCache.get(key);
+  const k = LITE ? `L:${key}` : key;
+  if (!geoCache.has(k)) geoCache.set(k, make());
+  return geoCache.get(k);
 };
 
 // ------------------------------------------------------------------ head --
@@ -161,8 +169,9 @@ function sculpt(ux, uy, uz, v) {
 }
 
 function headGeo(v, lo = false) {
+  lo = lo || LITE;
   return cached(`head:${lo}:${JSON.stringify(v)}`, () => {
-    const g = lo ? new THREE.SphereGeometry(1, 40, 28) : new THREE.SphereGeometry(1, 96, 64);
+    const g = LITE ? new THREE.SphereGeometry(1, 24, 16) : lo ? new THREE.SphereGeometry(1, 40, 28) : new THREE.SphereGeometry(1, 96, 64);
     const p = g.attributes.position;
     const col = new Float32Array(p.count * 3);
     for (let i = 0; i < p.count; i++) {
@@ -190,7 +199,7 @@ function faceZ(x, y, v) {
 function hairGeo(style, v) {
   return cached(`hair:${style}:${JSON.stringify(v)}`, () => {
     const S = HAIR_STYLES[style];
-    const g = new THREE.SphereGeometry(1, 80, 56);
+    const g = LITE ? new THREE.SphereGeometry(1, 28, 18) : new THREE.SphereGeometry(1, 80, 56);
     const p = g.attributes.position;
     const mask = new Float32Array(p.count);
     for (let i = 0; i < p.count; i++) {
@@ -409,7 +418,7 @@ function add(parent, geo, material, x = 0, y = 0, z = 0) {
   return m;
 }
 
-const sphere = (r, w = 20, h = 14) => cached(`sph:${r}:${w}`, () => new THREE.SphereGeometry(r, w, h));
+const sphere = (r, w = 20, h = 14) => cached(`sph:${r}:${w}`, () => new THREE.SphereGeometry(r, lite(w, 6), lite(h, 4)));
 
 // torso and pelvis shapes for a body type
 function bodyShape(L) {
@@ -425,7 +434,13 @@ function bodyShape(L) {
 }
 
 // Builds a person from a look (a key of LOOKS or a look object).
-export function makePerson(lookKey) {
+export function makePerson(lookKey, { lite: light = false } = {}) {
+  const was = LITE;
+  LITE = light;
+  try { return buildPerson(lookKey); } finally { LITE = was; }
+}
+
+function buildPerson(lookKey) {
   const L = typeof lookKey === 'string' ? LOOKS[lookKey] : lookKey;
   const B = bodyShape(L);
   const root = new THREE.Group();
@@ -664,7 +679,7 @@ export function makePerson(lookKey) {
   const eyeR = 0.0118;
   const eM = eyeMat(L.iris || 0x3a2a1a);
   const browM = mat(L.hairColor, { rough: 0.8 });
-  for (const s of L.plastic ? [] : [-1, 1]) {
+  for (const s of L.plastic || LITE ? [] : [-1, 1]) {
     const ex = s * 0.0305 * fv.w, ey = 0.003;
     const ez = faceZ(ex, ey, fv) - eyeR * 0.55;
     const eye = add(skull, sphere(eyeR, 24, 16), eM, ex, ey, ez);
@@ -801,7 +816,7 @@ function hand(wrist, s, m, f) {
     { y: 0.0, rx: 0.027 * k, rz: 0.017, n: 2.4 },
   ], 16)), m, 0, -0.004, 0);
   palm.rotation.y = Math.PI / 2;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < (LITE ? 0 : 4); i++) {
     const len = [0.07, 0.078, 0.074, 0.06][i] * k;
     const fm = add(wrist, cached(`finger:${i}:${f}`, () => limb(len, taper(0.0095 * k, 0.0075 * k), { N: 10, steps: 4 })), m, 0, -0.088 * k, (1.5 - i) * 0.0185 * k);
     fm.rotation.set((i - 1.5) * 0.05, 0, -s * (0.28 + i * 0.05));
@@ -930,8 +945,10 @@ export class Rig {
     this.possessedShown = false;
   }
 
-  // ask for a knock or a line of speech; they play over whatever pose is on
+  // ask for a knock, a punch or a line of speech; they play over whatever
+  // pose is on
   knock() { this.knockT = 1.25; }
+  punch() { this.punchT = 0.32; }
   talk(sec = 1.5) { this.talkT = sec; }
 
   setPossessed(on) {
@@ -947,7 +964,8 @@ export class Rig {
     this.t += dt;
     const t = this.t;
     const pose = st.pose || 'stand';
-    const sp = pose === 'walk' || pose === 'stand' ? st.speed || 0 : 0;
+    const legsWalk = pose === 'walk' || pose === 'stand' || pose === 'aim' || pose === 'aim2';
+    const sp = legsWalk ? st.speed || 0 : 0;
     const moving = sp > 0.12;
     const still = st.possessed || st.stiff;
     if (moving) this.phase += dt * (1.6 + sp * 2.1) * (st.stride || 1);
@@ -1022,6 +1040,31 @@ export class Rig {
       set('shLX', -2.05); set('shLZ', -0.12); set('elL', -0.08); set('wrL', 0.15);
       set('neckX', -0.3); set('spineX', -0.05);
       if (pose === 'wave') { set('shRX', -2.8); set('shRZ', 0.32 + Math.sin(t * 2.2) * 0.3); set('elR', -0.4); }
+    } else if (pose === 'aim' || pose === 'aim2') {
+      // a gun held out in front, pointed where they look (legs walk as usual)
+      if (moving) {
+        set('hipLX', -s * amp); set('hipRX', s * amp);
+        set('kneeL', Math.max(0, c) * amp * 1.55 + 0.06); set('kneeR', Math.max(0, -c) * amp * 1.55 + 0.06);
+        set('pelvisY', 0.95 - 0.012 + Math.abs(c) * amp * 0.035);
+      }
+      const ap = st.aimPitch || 0;
+      set('spineX', -ap * 0.3); set('chestX', -ap * 0.3);
+      set('shRX', -1.5 - ap * 0.4); set('shRZ', 0.12); set('elR', -0.06); set('wrR', 0.1);
+      if (pose === 'aim2') { set('shLX', -1.3 - ap * 0.4); set('shLZ', -0.42); set('shLY', -0.3); set('elL', -0.75); }
+      else { set('shLX', moving ? s * amp * 0.4 : 0.05); set('elL', -0.3); }
+    } else if (pose === 'drive') {
+      set('pelvisY', 0.5); set('hipLX', -1.4); set('hipRX', -1.4); set('kneeL', 1.3); set('kneeR', 1.35);
+      set('spineX', -0.12); set('shLX', -1.0); set('shRX', -1.0); set('shLZ', -0.12); set('shRZ', 0.12); set('elL', -0.6); set('elR', -0.6);
+    } else if (pose === 'hands') {
+      // hands up
+      set('shLX', -2.9); set('shRX', -2.9); set('shLZ', -0.35); set('shRZ', 0.35); set('elL', -0.4); set('elR', -0.4);
+    } else if (pose === 'cower') {
+      set('pelvisY', 0.58); set('hipLX', -1.5); set('hipRX', -1.3); set('kneeL', 2.1); set('kneeR', 1.9);
+      set('ankleL', -0.5); set('ankleR', -0.5); set('spineX', 0.6); set('neckX', 0.2);
+      set('shLX', -2.5); set('shRX', -2.5); set('shLZ', -0.4); set('shRZ', 0.4); set('elL', -2.1); set('elR', -2.1);
+    } else if (pose === 'jump') {
+      set('hipLX', -0.7); set('hipRX', -0.25); set('kneeL', 1.1); set('kneeR', 0.6); set('ankleL', 0.3);
+      set('shLX', -0.5); set('shRX', -0.3); set('shLZ', -0.5); set('shRZ', 0.5); set('elL', -0.5); set('elR', -0.5);
     } else if (pose === 'hold') {
       // holding something in front with both hands (a pizza, a toolbox)
       set('shLX', -0.55); set('shRX', -0.55); set('elL', -1.0); set('elR', -1.0); set('shLZ', -0.12); set('shRZ', 0.12);
@@ -1039,6 +1082,13 @@ export class Rig {
       set('shRX', ease(T.shRX, -1.25, k)); set('shRZ', ease(T.shRZ, 0.2, k));
       set('elR', ease(T.elR, -1.35 + rap * 0.45, k));
       set('wrR', ease(0, 0.3, k));
+    }
+    // a punch: the right arm jabs out and back
+    if (this.punchT > 0) {
+      this.punchT -= dt;
+      const k = Math.sin(Math.max(0, this.punchT / 0.32) * Math.PI);
+      set('shRX', ease(T.shRX, -1.55, k)); set('shRZ', ease(T.shRZ, 0.1, k));
+      set('elR', ease(T.elR, -0.05, k)); set('spineY', (T.spineY || 0) - 0.35 * k);
     }
     // carrying a prop: the left hand holds it
     if (this.prop && pose !== 'hold' && pose !== 'collapse') {

@@ -1,92 +1,87 @@
-# Night Security · Kingsgate Mall
+# Kingsgate Nights
 
-A co-op, first-person horror game that runs in the browser. You (and up to
-three friends) work the graveyard shift as security guards at a dying
-shopping mall, lock it up for the night, and figure out what's going on in
-it. The story, places and characters are original.
+An open-world crime game in the browser, in the spirit of the old 3D GTA
+games, for you and up to three friends. Steal cars, outrun the police and
+take jobs from the people who run the city of Kingsgate, all night long. The
+story, places and characters are original.
 
-Thursday, October 24, 1996. Kingsgate Mall closes for good next week, and
-Gatehouse Security has put you on nights: ten at night to six in the
-morning. The last night guard, Dale Mercer, stopped coming in on Tuesday.
-His car is still in the lot.
+November 1996. Kingsgate Mall, where you used to work nights as a security
+guard, is a fenced-off pile of rubble now, and the job went with it. The
+city's still awake, though, and some of the people who run it have work for
+somebody who doesn't scare easily:
 
-It opens with the manager, Mr. Okafor, handing you the keys at closing time
-and leaving by the south doors. Then it's eight hours alone in the mall:
+- **Ray Okafor**, who managed the mall and sells used cars now, by the Strip,
+  has cars that need taking back from people who stopped paying.
+- **Lena Voss** runs the harbour, and more than the harbour.
+- **Dale Mercer**, the old night guard, never quite got over that last week
+  at the mall. He has one last thing for you.
 
-- **10 PM, locking up.** Lock the south doors behind him, the food court
-  entrance and the loading dock. Pull down and padlock the shop gates the
-  staff left open. Find the security office and radio in to Gatehouse.
-  Dale's logbook is on the desk.
-- **The rounds.** Three times in the night, walk Dale's round: turn the key
-  in all six watchclock stations, from the record shop to the loading dock
-  to inside Halvorsen's, the department store that closed in the spring.
-  The watchclock keeps a tape of every punch. So does somebody else.
-- **The mannequins.** Halvorsen's window has thirteen of them. They only
-  move when nobody can see them: not in anyone's view, not in a flashlight
-  beam, not on a camera someone in the office is watching. In the dark you
-  can't see them, so they can move. A locked gate stops them; an unlocked
-  one doesn't.
-- **From one in the morning,** the power goes out across the concourse, and
-  something wearing Dale's uniform walks his round with his keys, unlocking
-  what you locked and flipping breakers. If it sees you, it comes for you.
-  Run, break its line of sight, hide, or shine your flashlight full in its
-  face.
-- **The PA, the carousel, channel two on the walkie.** Things in the mall
-  start by themselves. Somebody is still alive in here.
-- **5 AM.** Everything that's left comes for the security office. Get
-  everyone inside and throw the deadbolt.
-- **6 AM.** The manager's back at the south doors. Let him in and file the
-  incident report: who's been unlocking the gates, what the mannequins are
-  doing, and where Dale is. Your notes ([J]) fill in with every clue you
-  find. How it ends, and your grade, depend on what you found and who made
-  it to morning.
+Seven jobs, start to finish: repossessions, a car alarm and the police on
+your tail, a gunfight at the Pool Hall, a getaway driver's job, a street
+race through twelve checkpoints, a convoy of vans to burn, and a crate at
+Pier 3 that Dale wants destroyed. Between jobs the city is yours: thirteen of
+the mall's old security tapes are hidden round town, guns and armour lie
+about or can be bought at Kingsgate Arms, and Spray-N-Go will respray your
+car and make the police forget you were ever in it.
 
-A full night takes about 25 minutes. Where Dale is, and his locker
-combination, are picked fresh every night.
-
-**Play it:** <https://nickypeakin.github.io/nightsecurity/> (once GitHub
-Pages is switched on: see below). It works in Chrome, Edge or Firefox on a
-computer with a keyboard and mouse. Headphones help.
+**Play it:** <https://nickypeakin.github.io/nightsecurity/>. It works in
+Chrome, Edge or Firefox on a computer with a keyboard and mouse. Headphones
+help.
 
 ## Controls
 
-| Key | Action |
-| --- | --- |
-| WASD / arrows | walk (Shift to run, C to crouch) |
-| Mouse | look |
-| E | use: open, shut, pull a gate down, turn a station key, read, hide |
-| R | lock or unlock the gate or door you're looking at |
-| F | flashlight |
-| V | walkie-talkie (Gatehouse dispatch) |
-| M | map: what's locked, the clock stations, everyone |
-| J | notes (and, at six, the incident report) |
-| 1 to 4 | shout to your friends |
-| Esc | pause |
-| Space (hold) | skip the opening (host only) |
+| Key | On foot | In a car |
+| --- | --- | --- |
+| WASD / arrows | walk (Shift to sprint, Alt to stroll) | drive and steer |
+| Mouse | look | look round (the camera swings back behind you) |
+| F | get in the nearest car (or drag the driver out) | get out |
+| Right mouse | aim | |
+| Left mouse | shoot, or punch | |
+| Q, E, wheel, 1 to 4 | switch weapons | |
+| Space | jump | handbrake |
+| H, G, R | | horn, siren (police cars), radio |
+| E | buy at the gun shop counter | |
+| M | the map | the map |
+| Space | skip the opening, or a job's dialogue | |
+| Esc | pause | pause |
 
-At the monitors in the security office: A/D or 1 to 8 to switch cameras,
-E to step back. At the breaker panel: 1 to 6. At Dale's locker: type the
-combination and press Enter.
+## How it plays
+
+- **Jobs.** The big letters on the radar (O, V, D) are the people with work.
+  Walk into the glowing ring next to them to start a job, with no stars.
+  The objective is at the bottom of the screen and what you need is on the
+  radar: yellow for where to go, blue for a car or a friend, red for a
+  target. Fail one and you can walk back in and try again.
+- **Stars.** Crimes make the police want you: stealing cars (especially
+  theirs), hitting or running people over, gunfire, killing. Stars bring
+  police cars, then officers on foot; from two stars they shoot. Get out of
+  every cop's sight long enough and the stars go (the more stars, the
+  longer), or drive into Spray-N-Go for $100. Let an officer get hold of you
+  and you're **busted**: you lose your guns and $150. Die and you're
+  **wasted**: the hospital charges $100.
+- **Your place.** The green ring by your front door in Kingsgate Heights
+  saves the game. It also saves when you pass a job or find a tape, and
+  **Continue** on the main menu picks up where you left off.
 
 ## Playing with friends
 
-- **Alone:** click **Work Alone**. Everything still works with one guard;
-  you just have to watch the mannequins and walk the rounds yourself.
-- **With friends:** one person clicks **Host a Shift** and sends the invite
-  link from the lobby (the **Copy** button). Friends open the link and
-  press **Join the Shift**, or open the game and type the 5-letter code. The
-  host clicks **Clock In** once everyone's there.
+- **Alone:** click **New Game**.
+- **With friends:** one person clicks **Host a Game** and sends the invite
+  link from the lobby (the **Copy** button). Friends open the link and press
+  **Join the Game**, or open the game and type the 5-letter code. The host
+  clicks **Start** once everyone's there.
 
-There's no game server. The host's browser runs the night, and friends
+Everyone shares the jobs (any of you can do any step, and everyone gets
+paid), but each of you has your own money, guns and wanted level. Climb into
+a friend's car with F to ride along and shoot out of the window.
+
+There's no game server. The host's browser runs the city, and friends
 connect straight to it over WebRTC; the free [PeerJS](https://peerjs.com)
 service is only used to find each other by lobby code. The host has to keep
 the game open while everyone plays. If friends can't get in, have everyone
 press **Test Connection** on the main menu. Some school and work networks
 block these connections; switching either player to a different network (a
 phone hotspot works) usually fixes it.
-
-With more guards, one of you can sit at the monitors and keep a camera on
-the mannequins while the others walk the round.
 
 ## Publishing to GitHub Pages
 
@@ -102,80 +97,83 @@ Needs Node.js 20 or newer.
 ```sh
 npm install
 npm run dev      # builds dist/ and serves it at http://localhost:8080
-npm test         # plays whole nights headless, and walks every room of the mall
+npm test         # plays every job headless, and checks the city's layout
 ```
-
-`?hour=3` in the address starts the night at that hour (0 is 10 PM, 7 is
-5 AM, 8 is 6 AM), which is handy when changing one part of it.
 
 ## How it's built
 
 Plain JavaScript modules and [three.js](https://threejs.org). Every model,
 texture and sound is generated in code, so there are no asset files.
 
-The mall is laid out once, in `shared/mall.js`, as plain numbers: the
-rooms, walls, shop gates and doors, props, clock stations, cameras and
-hiding places. The host builds its collision and a half-metre navigation
-grid from that, and each client builds the 3D mall from the same plan
-(merged by material into big chunks, so it draws quickly). The lights work the same way: every
-ceiling fixture sits on one 4 m grid and belongs to a breaker and a room, so
-a patched three.js shader can light the whole mall with a hundred-odd lights
-without them shining through walls, and the host can tell how well lit any
-spot is (which matters, because the mannequins can't move while someone can
-see them). The CCTV monitors render the mall from each camera into a
-texture. The people are sculpted from smooth lofted shapes; the mannequins
-are the same bodies in white plastic, baked into fixed poses.
+The city is laid out once, in `shared/city.js`, as plain numbers: a six by
+six grid of junctions 80 m apart with traffic lights, the districts and
+their buildings, parking spaces, street lamps, props and the pavements'
+walking network. The host builds its collision from that and each client
+builds the 3D city from the same plan, merged into a few big meshes per
+80 m square so it draws quickly. Hundreds of street lamps light the city
+through one patched three.js shader that looks lamps up in a small texture
+laid over the map. Cars use one arcade physics model (`shared/car.js`) that
+your own browser runs for the car you drive and the host runs for all the
+traffic. The people are the procedural bodies from the other games, turned
+into skinned meshes so a crowd costs a handful of draws each.
 
 ```
 public/
   index.html, css/style.css
-  js/main.js              menus, lobby and the flow of a night
+  js/main.js              menus, the lobby, saving, the frame loop
   js/shared/              rules the host and every client agree on
-    config.js             tuning numbers
-    mall.js               the building: rooms, walls, gates, doors, props,
-                          stations, cameras, hiding places, collision, nav grid
-    lights.js             every light, its breaker and its room
-    story.js              everything anyone says, the clues, the report, endings
+    config.js             tuning numbers: speeds, weapons, wanted levels, prices
+    city.js               the roads, lanes and lights, blocks and buildings,
+                          parking, lamps, the walking network, collision
+    car.js                the cars and how they drive
+    collide.js            boxes, cars, people and bullets
+    lights.js             the street lamps, as a grid for the shader
+    story.js              everyone and everything they say, the jobs, the tapes
     rng.js
   js/host/                runs in the host's browser (and in Node for tests)
-    lobby.js              guards joining and leaving, starting a night
-    match.js              the night: hours, doors and locks, breakers, the
-                          radio, Dale, the report and the grade
-    mannequins.js         they only move when nobody's watching
-    stalker.js            the thing in Dale's uniform
-    nav.js                walking the nav grid's distance fields
+    lobby.js              players joining and leaving, starting a game
+    match.js              the city: players, cars, shooting, pickups, the shop,
+                          crashes and fires, streaming traffic and people in
+    drivers.js            traffic: lanes, turns, red lights, chases, races
+    peds.js               people on the pavements, gangs, cops on foot
+    police.js             stars, dispatch, chases, arrests
+    missions.js           the jobs, step by step
     timers.js
-  js/client/              what each guard sees and hears
-    game.js               first person: moving, using and locking things,
-                          the monitors, the panels, the map, the notes
-    mallScene.js          the mall, built from the plan
-    lighting.js           the shader patch for the mall's lights
-    models.js, props.js   gates, doors, escalators, the fountain, everything else
-    humans.js             procedural people (and mannequins)
-    cctv.js               the security cameras
-    cutscene.js           closing time
-    mapview.js            the map
-    post.js               tone mapping, bloom, the CCTV and VHS looks
-    audio.js, voice.js    synthesised sound, spoken lines
-    avatar.js, ui.js, net.js, input.js, attract.js, textures.js, util.js
+  js/client/              what each player sees and hears
+    game.js               third person on foot and behind the wheel, aiming,
+                          the camera, the HUD, the map, the shop
+    cityScene.js          the city, built from the plan
+    lighting.js           the street-light shader patch
+    vehicles.js           the six car models, lights, sirens
+    people.js, humans.js  procedural people, skinned for crowds, and their guns
+    radar.js              the radar and the map
+    fx.js                 muzzle flashes, tracers, fire, smoke, markers, pickups
+    post.js               tone mapping, bloom, the VHS look
+    audio.js, voice.js    synthesised engines, guns, sirens, radio; spoken lines
+    ui.js, net.js, input.js, attract.js, textures.js, props.js, util.js
 test/
-  sim.test.js             whole nights with 1 to 4 guards, the mannequin rules,
-                          the stalker, the report, everyone taken
-  walk.test.js            every room, station and hiding place reachable;
-                          locked gates keep you out
+  sim.test.js             traffic and crowds, the police, busted and wasted,
+                          carjacking, fires, the shop, saving, co-op, and all
+                          seven jobs played start to finish
+  walk.test.js            every lane, junction and parking space has room for
+                          a car; every place, tape and pickup can be walked to;
+                          the lights; the car physics
 ```
 
-The host decides everything that matters (where the mannequins and the
-stalker are, who's caught, what's locked, what dispatch says); each client
-moves its own guard, says what it uses, and draws the rest from the host's
-snapshots.
+The host decides everything that matters (where every car and person is,
+who's hit, who's wanted, how each job is going); each client drives its own
+character or car, says what it shoots at, and draws the rest from the host's
+snapshots, ten a second, a little behind so everything moves smoothly.
 
-### Where the engine came from
+### Where it came from
 
-The engine is lifted from the other games on this account, mostly
-[Cinder Peak](https://github.com/nickypeakin/fears-to-fathom): the
-networking and lobby, the procedural people and their animation,
-post-processing, synthesised sound and spoken voices, input, the build and
-the Pages workflow. The networking core is the same one
-[backrooms](https://github.com/nickypeakin/backrooms) uses. The mall, its
-lighting, the CCTV, the mannequins and the stalker are new.
+This repository used to be **Night Security**, a co-op horror game set in
+Kingsgate Mall. The mall's been knocked down (it's the Old Mall Site on the
+map now) and its engine kept: the networking and lobby, the procedural people,
+the light-grid shader, post-processing, synthesised sound and spoken voices,
+input, the build and the Pages workflow. Most of that came from the other
+games on this account, especially
+[Cinder Peak](https://github.com/nickypeakin/fears-to-fathom), and the
+networking core is the one [backrooms](https://github.com/nickypeakin/backrooms)
+uses. The city, the cars, the traffic, the police, the guns and the jobs are
+new.

@@ -1,30 +1,66 @@
-// Kingsgate Mall from this guard's point of view: the opening, then first
-// person through the night. Walk the mall, pull down and lock the gates,
-// open and shut doors, turn the key in the clock stations, read what Dale
-// left behind, watch the cameras, throw the breakers, hide, talk on the
-// walkie, and keep looking at the mannequins. The host decides everything
-// that matters; this file shows it and sends back what you do.
+// Playing: your character (on foot, in third person) or your car, everyone
+// else smoothed from the host's snapshots, the camera, shooting, the jobs'
+// markers, pickups, the HUD, the radar and the sound.
+//
+// You move yourself and drive your own car here, with the same collision
+// and car physics the host uses, and tell the host where you are; the host
+// decides what your bullets hit, who's wanted, what's been picked up.
 
 import * as THREE from 'three';
-import { PLAYER_R, EYE, WALK, SPRINT, CROUCH, STAMINA_MAX, STAMINA_REGEN, REACH } from '../shared/config.js';
-import { DOORS, STATIONS, CAMERAS, HIDES, SPOTS, START_SPOTS, BREAKERS, UNIFORM_HOME, Solids, staticSolids, doorBox, roomAt } from '../shared/mall.js';
-import { FIXTURES, lightAt } from '../shared/lights.js';
-import { HOURS, CLUES, CLUE_ORDER, REPORT, SHOUTS, RADIO_LINES, logbook } from '../shared/story.js';
-import { WATCHED } from '../host/match.js';
-import { Avatar, Actor, MannequinsView, hideView } from './avatar.js';
-import { Cutscene } from './cutscene.js';
-import { CCTV } from './cctv.js';
-import { drawMap, doorState } from './mapview.js';
-import { makePerson } from './humans.js';
-import { MALL_UNIFORMS } from './lighting.js';
-import { esc, clockText } from './ui.js';
+import { PLAYER_R, WALK, JOG, SPRINT, JUMP_V, GRAVITY, REACH, WEAPONS, TICK, PRICES } from '../shared/config.js';
+import { PLACES, groundY, makeSolids, areaName } from '../shared/city.js';
+import { makeCar, stepCar, CAR_TYPES, CAR_KEYS } from '../shared/car.js';
+import { circleVsCar, rayCar, rayPerson } from '../shared/collide.js';
+import { PEOPLE, HELP, TITLE, DATE } from '../shared/story.js';
+import { PersonView, PLAYER_LOOKS, GIVER_LOOKS, template, gunModel } from './people.js';
+import { CarView, prewarmCars } from './vehicles.js';
+import { Fx, makeMarker, makePickup } from './fx.js';
+import { Radar } from './radar.js';
 import { sound } from './audio.js';
 import { voice } from './voice.js';
-import { lerp, clamp01, span } from './util.js';
+import { PED_LOOKS, LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2 } from '../host/peds.js';
 
-const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
-const DOOR_SPOT = (d) => ({ x: d.x, y: 1.0, z: d.z });
-const NAMES = Object.fromEntries(DOORS.map((d) => [d.id, d.name]));
+const $ = (id) => document.getElementById(id);
+const TAU = Math.PI * 2;
+const wrap = (a) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
+const lerpA = (a, b, k) => a + wrap(b - a) * k;
+const DELAY = 0.15;              // how far behind the host's clock others are drawn
+
+// my animation codes (the host passes them on to everyone else)
+const AN = { idle: 0, walk: 1, run: 2, aim: 3, jump: 10 };
+const WHO = { okafor: 'Ray Okafor', voss: 'Lena Voss', dale: 'Dale Mercer', brill: 'Teddy Brill' };
+
+// a short history of where something was, to draw it a moment in the past
+class Track {
+  constructor() { this.s = []; }
+  push(t, v) {
+    const last = this.s[this.s.length - 1];
+    if (last && t <= last[0]) return;
+    this.s.push([t, v]);
+    if (this.s.length > 10) this.s.shift();
+  }
+  // v: [x, z, h, ...rest]; angles at index 2
+  at(t) {
+    const s = this.s;
+    if (!s.length) return null;
+    if (t <= s[0][0]) return s[0][1];
+    for (let i = s.length - 1; i >= 0; i--) {
+      if (s[i][0] <= t) {
+        const a = s[i], b = s[i + 1];
+        if (!b) {
+          // past the newest: carry on a little the way it was going
+          const v = a[1].slice();
+          const dt = Math.min(0.25, t - a[0]);
+          if (v[3] != null && v.length > 5) { v[0] += Math.sin(v[2]) * v[3] * dt; v[1] += Math.cos(v[2]) * v[3] * dt; }
+          return v;
+        }
+        const k = (t - a[0]) / (b[0] - a[0]);
+        return a[1].map((x, j) => (j === 2 ? lerpA(x, b[1][j], k) : typeof x === 'number' ? x + (b[1][j] - x) * k : b[1][j]));
+      }
+    }
+    return s[0][1];
+  }
+}
 
 export class Game {
   constructor({ renderer, post, world, link, start, hud, input, settings }) {
@@ -38,1085 +74,925 @@ export class Game {
     this.me = link.id;
     this.isHost = start.host === link.id;
     this.roster = start.roster;
-    this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 260);
-    this.camera.rotation.order = 'YXZ';
-    this.myIndex = Math.max(0, this.roster.findIndex((r) => r.id === this.me));
-    const spot = START_SPOTS[this.myIndex % 4];
-    this.p = { x: spot.x, z: spot.z, ry: spot.ry, rx: 0, eye: EYE, vx: 0, vz: 0, stamina: STAMINA_MAX, tired: false, flash: false, crouch: false, stepDist: 0, mv: 0 };
-    this.mode = 'intro';
-    this.t = 0;
-    this.clock = 21.92;
-    this.hourIdx = -1;
-    this.fx = { fade: 1, fadeColor: 0x000000, bars: 1, fear: 0, staticAmt: 0, glitch: 0, exposure: 1, cctv: false };
-    this.fadeTo = 0;
-    this.fear = 0;
-    this.doors = DOORS.map(() => 1000);
-    this.breakers = Object.fromEntries(BREAKERS.map((b) => [b.id, true]));
-    this.flags = 0;
-    this.round = { n: 0, punched: [0, 0, 0, 0, 0, 0] };
-    this.radioOpts = [];
-    this.clues = new Set();
-    this.objectives = [];
-    this.report = { open: false, answers: [null, null, null], q: 0 };
-    this.code = null;
-    this.tape = null;
-    this.hide = null;
-    this.camIdx = 0;
-    this.viewing = null;
-    this.target = null;
+    this.myIdx = Math.max(0, this.roster.findIndex((r) => r.id === this.me));
+    this.myColor = this.roster[this.myIdx]?.color ?? 0;
+    this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 1100);
+    this.solids = makeSolids();
+    this.fx = new Fx(world);
+    this.radar = new Radar($('radar'), $('mapCanvas'));
+    const S = PLACES.safehouse;
+    this.p = { x: S.x + (this.myIdx - 1.5) * 1.6, z: S.z + 1.5, y: 0, vy: 0, h: Math.PI, speed: 0, anim: 0, kx: 0, kz: 0, downT: 0 };
+    this.camYaw = 0;
+    this.camPitch = 0.18;
+    this.camDist = 3.6;
+    this.camLook = 0;           // seconds since you last moved the mouse
+    this.shake = 0;
+    this.aim = false;
+    this.w = 0;
+    this.me$ = { hp: 100, armor: 0, money: 0, wanted: 0, ammo: WEAPONS.map((w, k) => (k ? -1 : -2)), clip: WEAPONS.map(() => 0), state: 0, searching: false, carry: false };
+    this.myCar = null;          // { id, c } while I'm driving
+    this.ride = null;           // { id, seat } while I'm a passenger
+    this.pending = null;
+    this.T = 0;
+    this.lastT = 0;
+    this.lastLocal = performance.now() / 1000;
     this.sendT = 0;
-    this.heartT = 0;
-    this.lookT = 0;
-    this.lookSent = new Set();
-    this.creakT = new Map();
-    this.solids = new Solids(staticSolids());
-    this.tmp = new THREE.Vector3();
-    this.tmp2 = new THREE.Vector3();
-    this.flicker = new Map();
-    this.flickerT = 0;
+    this.lastShot = -9;
+    this.reloadUntil = 0;
+    this.stepAcc = 0;
+    this.areaT = 0;
+    this.area = '';
+    this.mission = { title: '', text: '', blips: [], cut: false, active: false };
+    this.intro = -1;
+    this.mapOpen = false;
+    this.shopOpen = false;
+    this.helpQueue = [...HELP];
+    this.helpT = 4;
+    this.crashT = 0;
+    this.radioOn = true;
+    this.countAt = null;
 
-    const W = world;
-    // a flashlight per guard: build the shaders for that now, not on the
-    // first frame someone switches one on
-    if (W.useFlashlights(this.roster.length)) renderer.compile(W.scene, this.camera);
-    W.setBreakers({ concourse: true, court: true, food: true, stores: false, back: true, cams: true }, false, { force: true });
-    W.setFlags(0);
-    this.avatars = new Map();
-    for (const r of this.roster) this.avatars.set(r.id, new Avatar(r, this, r.id === this.me));
-    this.mq = new MannequinsView(this);
-    this.dale = new Actor('dale', this);
-    this.stalker = null;
-    this.manager = null;
-    this.cctv = new CCTV(W);
-    this.cutscene = new Cutscene(this, 'intro');
-    this.scare = { mannequin: makePerson('mq1'), stalker: makePerson('mqGuard') };
-    for (const s of Object.values(this.scare)) { s.visible = false; W.scene.add(s); }
+    // everyone and everything we've seen
+    this.cars = new Map();       // id -> { view, track, flags, type, hp, driver }
+    this.peds = new Map();       // id -> { view, track, look, dead }
+    this.others = new Map();     // player id -> { view, track, row }
+    this.pickups = new Map();    // id -> mesh
+    this.objects = new Map();    // id -> mesh
+    this.markers = new Map();    // key -> mesh
+    this.givers = new Map();     // giver -> PersonView
+    this.drivers = new Map();    // car id -> PersonView (people at the wheel of traffic)
+    this.arrows = [];
+    this.myView = new PersonView(world.scene, PLAYER_LOOKS[this.myColor % 4], { lite: false });
+    this.prewarm();
+    // the places you can always go: the gun shop counter, your door
+    this.addMarker('shop', PLACES.guns.x, PLACES.guns.z, 'shop', 0.9);
+    this.addMarker('save', PLACES.safehouse.x, PLACES.safehouse.z, 'save', 0.9);
 
-    const L = this.link;
+    const L = link;
     this.off = [
       L.on('s', (m) => this.onSnapshot(m)),
-      L.on('hour', (m) => this.onHour(m)),
-      L.on('obj', (m) => { this.objectives = m.list; this.hud.objectives(m.list, m.done); if (m.done) sound.chime(); }),
+      L.on('mission', (m) => this.onMission(m)),
       L.on('say', (m) => this.onSay(m)),
+      L.on('bark', (m) => this.onBark(m)),
+      L.on('banner', (m) => this.onBanner(m)),
       L.on('fx', (m) => this.onFx(m)),
-      L.on('clue', (m) => this.onClue(m.k)),
-      L.on('logbook', (m) => { this.code = m.code; this.openLog(); }),
-      L.on('tape', (m) => { this.tape = m.rows; this.openTape(); }),
-      L.on('vcr', () => this.openVcr()),
-      L.on('photos', () => this.openPhotos()),
-      L.on('tp', (m) => this.teleport(m)),
-      L.on('taken', (m) => this.onTaken(m)),
-      L.on('report', (m) => this.onReport(m)),
-      L.on('toast', (m) => this.hud.toast(m.text)),
-      L.on('dropped', (m) => this.hud.toast(`${this.nameOf(m.id)} lost connection.`)),
+      L.on('hurt', (m) => { this.hud.hurt(m.n); this.shake = Math.min(1, this.shake + m.n / 40); }),
+      L.on('knock', (m) => { this.p.kx = m.vx; this.p.kz = m.vz; this.p.downT = 1.2; }),
+      L.on('entered', (m) => this.onEntered(m)),
+      L.on('exited', (m) => this.onExited(m)),
+      L.on('respawn', (m) => this.onRespawn(m)),
+      L.on('weapon', (m) => { this.w = m.w; }),
+      L.on('reload', (m) => { this.reloadUntil = this.T + m.s; sound.reload(); }),
+      L.on('shop', (m) => { this.shopMsg = m.ok ? 'Thanks.' : m.text; sound.jingle(m.ok ? 'cash' : 'failed'); }),
+      L.on('countdown', (m) => { this.countAt = m.at; }),
+      L.on('credits', () => this.credits()),
+      L.on('shush', () => { voice.stop(); this.hud.clearSubs(); for (const t of this.sayTimers || []) clearTimeout(t); this.sayTimers = []; }),
     ];
-
-    sound.setScene('mall', 2);
+    this.shopKeys = (e) => this.onShopKey(e);
+    addEventListener('keydown', this.shopKeys);
+    this.shopClick = (e) => { const b = e.target.closest('button[data-buy]'); if (b) this.link.send({ t: 'buy', item: b.dataset.buy }); };
+    $('shop').addEventListener('click', this.shopClick);
     hud.show();
-    hud.cinematic(true);
-    hud.prompt(this.isHost ? 'Hold SPACE to skip' : null);
-    this.applyBrightness();
-    this.updateTeam();
+    hud.money(0);
+    sound.setScene('city', 1);
   }
 
-  nameOf(id) {
-    const r = this.roster.find((x) => x.id === id);
-    return r ? r.name : '???';
+  // build every body and car once now, so nobody's first appearance stalls
+  prewarm() {
+    const g = new THREE.Group();
+    const looks = [...Array(PED_LOOKS).keys(), LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2];
+    for (const l of looks) template(l);
+    for (const k of PLAYER_LOOKS) template(k, { lite: false });
+    const v = new PersonView(g, 0);
+    v.root.position.y = -50;
+    const undo = prewarmCars(g);
+    this.world.scene.add(g);
+    this.renderer.compile(this.world.scene, this.camera);
+    this.world.scene.remove(g);
+    undo();
   }
 
-  applyBrightness() {
-    MALL_UNIFORMS.mallScale.value = this.settings.bright ?? 1;
-  }
-
-  // ----------------------------------------------------------- network --
-  onSnapshot(m) {
-    this.clock = m.T;
-    this.hourIdx = m.h;
-    for (const row of m.ps) {
-      const a = this.avatars.get(row[0]);
-      if (!a) continue;
-      a.apply(row);
-      if (a.isMe) {
-        const hide = row[6] || null;
-        if (hide !== this.hide) this.setHide(hide);
+  // ------------------------------------------------------------ messages
+  onSnapshot(s) {
+    const now = performance.now() / 1000;
+    // the host's clock, smoothed
+    const est = this.lastT + (now - this.lastLocal);
+    this.lastT = Math.abs(s.T - est) > 1 ? s.T : est + (s.T - est) * 0.1;
+    this.lastLocal = now;
+    this.intro = s.intro;
+    const seen = new Set();
+    // players
+    for (const r of s.p) {
+      const [id, x, z, y, h, ay, ap, anim, w, hp, armor, car, seat, wanted, money, flags, ammo, clip] = r;
+      if (id === this.me) {
+        const M = this.me$;
+        if (M.money !== money && M.money != null && money > M.money) sound.jingle('cash');
+        Object.assign(M, { hp, armor, money, wanted, ammo, clip, state: flags & 3, searching: !!(flags & 8), carry: !!(flags & 16), car, seat });
+        if (WEAPONS[this.w] && ammo[this.w] === -1 && this.w !== 0) this.w = 0;
+        // the host took me out of a car (it blew up, I was arrested)
+        if (car < 0 && (this.myCar || this.ride) && !this.pending) { this.myCar = null; this.ride = null; }
+        continue;
       }
+      let O = this.others.get(id);
+      if (!O) {
+        const ros = this.roster.find((q) => q.id === id);
+        O = { view: new PersonView(this.world.scene, PLAYER_LOOKS[(ros?.color ?? 0) % 4], { lite: false }), track: new Track(), name: ros?.name || 'Friend', color: ros?.color ?? 0 };
+        this.others.set(id, O);
+      }
+      O.row = r;
+      O.track.push(s.T, [x, z, h, y]);
+      seen.add(id);
     }
-    this.mq.apply(m.mq, (m.f & 16) !== 0);
-    if (m.sk) {
-      if (!this.stalker) this.stalker = new Actor('mqGuard', this);
-      this.stalker.apply(m.sk);
-    } else if (this.stalker) { this.stalker.dispose(); this.stalker = null; }
-    this.dale.apply(m.dl.slice(0, 4));
-    this.daleMode = m.dl[4];
-    if (m.mg) {
-      if (!this.manager) this.manager = new Actor('manager', this);
-      this.manager.apply(m.mg);
-    } else if (this.manager && this.mode !== 'intro') { this.manager.dispose(); this.manager = null; }
-    this.doors = m.d;
-    this.world.setDoors(m.d);
-    const dyn = [];
-    DOORS.forEach((d, k) => {
-      const st = doorState(m.d[k]);
-      if (d.kind === 'glass' || d.kind === 'rollup' || st.open < (d.kind === 'gate' ? 0.6 : 0.5)) dyn.push(doorBox(d));
-    });
-    this.solids.dynamic = dyn;
-    const B = {};
-    BREAKERS.forEach((b, i) => { B[b.id] = !!m.b[i]; });
-    this.breakers = B;
-    this.flags = m.f;
-    this.world.setFlags(m.f);
-    if (this.mode !== 'intro') this.world.setBreakers(B, (m.f & 2) !== 0);
-    sound.setCarousel((m.f & 2) !== 0, SPOTS.carousel);
-    if ((m.f & 1) !== 0) { if (!this.paOn) { this.paOn = true; sound.paChime(); sound.startMuzak(0.45, true); } }
-    else if (this.paOn) { this.paOn = false; sound.stopMuzak(1); }
-    this.round = { n: m.rn, punched: m.rp };
-    this.radioOpts = m.ro;
-    this.updateTeam();
+    for (const [id, O] of this.others) if (!seen.has(id)) { O.view.dispose(); this.others.delete(id); }
+    // cars
+    seen.clear();
+    for (const r of s.c) {
+      const [id, ti, paint, x, z, h, v, steer, hp, flags, dl, sl, yw] = r;
+      let C = this.cars.get(id);
+      if (!C) {
+        C = { view: new CarView(this.world.scene, CAR_KEYS[ti], paint), track: new Track(), type: CAR_KEYS[ti] };
+        this.cars.set(id, C);
+      }
+      C.view.setPaint(paint);
+      C.flags = flags; C.hp = hp; C.driverLook = dl; C.paint = paint;
+      C.track.push(s.T, [x, z, h, v, steer, sl, yw]);
+      seen.add(id);
+    }
+    for (const [id, C] of this.cars) if (!seen.has(id)) { C.view.dispose(); this.cars.delete(id); const d = this.drivers.get(id); if (d) { d.dispose(); this.drivers.delete(id); } }
+    // people
+    seen.clear();
+    for (const r of s.n) {
+      const [id, look, x, z, h, anim, w, dead, v] = r;
+      let P = this.peds.get(id);
+      if (!P) {
+        P = { view: new PersonView(this.world.scene, look), track: new Track(), look };
+        this.peds.set(id, P);
+      }
+      P.anim = anim; P.w = w; P.dead = dead;
+      P.track.push(s.T, [x, z, h, v]);
+      seen.add(id);
+    }
+    for (const [id, P] of this.peds) if (!seen.has(id)) { P.view.dispose(); this.peds.delete(id); }
+    // pickups and job props
+    seen.clear();
+    for (const [id, kind, x, z] of s.k) {
+      seen.add(id);
+      if (this.pickups.has(id)) continue;
+      const m = makePickup(kind, gunModel);
+      m.position.set(x, groundY(x, z), z);
+      m.userData.kind = kind;
+      this.world.scene.add(m);
+      this.pickups.set(id, m);
+    }
+    for (const [id, m] of this.pickups) if (!seen.has(id)) { m.removeFromParent(); this.pickups.delete(id); }
+    seen.clear();
+    for (const [id, kind, x, z] of s.o) {
+      seen.add(id);
+      if (this.objects.has(id)) continue;
+      const m = makePickup(kind, gunModel);
+      m.position.set(x, groundY(x, z), z);
+      this.world.scene.add(m);
+      this.objects.set(id, m);
+    }
+    for (const [id, m] of this.objects) if (!seen.has(id)) { m.removeFromParent(); this.objects.delete(id); }
   }
 
-  updateTeam() {
-    this.hud.team(this.roster.map((r) => {
-      const a = this.avatars.get(r.id);
-      const room = a && !a.isMe && a.alive ? roomAt(a.x, a.z) : null;
-      return { name: r.name, me: r.id === this.me, color: r.color, out: a && a.taken, where: a && a.hidden ? 'hiding' : a && a.cctv ? 'on the cameras' : room ? room.name : '' };
-    }));
+  onMission(m) {
+    this.mission = m;
+    this.hud.mission(m.text || '');
+    this.hud.cinematic(!!m.cut);
+    // markers in the world for the places on the radar
+    const want = new Map();
+    for (const b of m.blips) {
+      if (b.k === 'giver') want.set(`giver:${b.l}`, ['giver', b.x, b.z, 1.2]);
+      if (b.k === 'dest') want.set(`dest:${b.x}:${b.z}`, ['dest', b.x, b.z, Math.min(b.r || 4, 6)]);
+      if (b.k === 'check' || b.k === 'check2') want.set(`${b.k}:${b.x}:${b.z}`, [b.k, b.x, b.z, b.k === 'check' ? 6.5 : 4]);
+    }
+    for (const [k, m2] of this.markers) if (!want.has(k) && !k.startsWith('fixed:')) { m2.removeFromParent(); this.markers.delete(k); }
+    for (const [k, [kind, x, z, r]] of want) if (!this.markers.has(k)) this.addMarker(k, x, z, kind, r, false);
+    // whoever's giving the next job, standing by their marker (and still
+    // there while they tell you about it)
+    const givers = new Set(m.blips.filter((b) => b.k === 'giver').map((b) => b.l));
+    for (const [key, P] of Object.entries(PEOPLE)) {
+      const show = givers.has(P.blip) || (m.active && m.cut && m.giver === key);
+      const v = this.givers.get(key);
+      if (show && !v) {
+        const g = new PersonView(this.world.scene, GIVER_LOOKS[key], { lite: false });
+        const at = PLACES[key];
+        g.set(at.x + 1.6, at.z + (at.h === Math.PI ? 0.8 : -0.8), at.h ?? 0, 0);
+        this.givers.set(key, g);
+      } else if (!show && v) { v.dispose(); this.givers.delete(key); }
+    }
   }
 
-  onHour(m) {
-    if (this.mode === 'intro') this.endIntro();
-    this.hud.card(m.title, m.sub, 4.5);
-    if (m.i > 0) sound.paChime();
+  addMarker(key, x, z, kind, r, fixed = true) {
+    const m = makeMarker(kind, r);
+    m.position.set(x, groundY(x, z), z);
+    this.world.scene.add(m);
+    this.markers.set(fixed ? `fixed:${key}` : key, m);
   }
 
-  // where a voice comes from
   onSay(m) {
-    if (m.radio) {
-      // everyone's walkie
-      sound.radio(1 + m.text.length * 0.05);
-      if (m.ch2) sound.static(1.2);
-      this.hud.say(m.ch2 ? 'Channel 2' : m.who, m.text, m.ch2 ? 'ch2' : 'radio');
-      if (!m.id || m.id !== this.me) voice.say(m.text, m.voice || (m.id ? 'friend' : 'radio'), { salt: 3 });
-      return;
-    }
-    if (m.pa) {
-      this.hud.say('PA', m.text, 'pa');
-      voice.say(m.text, 'pa');
-      return;
-    }
-    if (m.id) {
-      const r = this.roster.find((x) => x.id === m.id);
-      this.hud.say(r ? r.name : '???', m.text);
-      const a = this.avatars.get(m.id);
-      if (a) a.rig.talk(1.3);
-      if (m.id !== this.me) voice.say(m.text, 'friend', { salt: r ? r.color : 0, sex: r && r.color % 2 ? 'f' : 'm' });
-      return;
-    }
-    // someone in the mall: only if you're near enough to hear
-    if (m.at) {
-      const c = this.camera.position;
-      if (Math.hypot(c.x - m.at[0], c.z - m.at[2]) > 22) return;
-    }
-    if (m.who === 'Dale') this.dale.rig.talk(1.6);
-    if (m.who === 'Ray Okafor' && this.manager) this.manager.rig.talk(1.6);
-    this.hud.say(m.who, m.text);
-    voice.say(m.text, m.voice || 'friend');
+    const go = () => {
+      const radio = m.radio;
+      const name = WHO[m.who] || m.who;
+      this.hud.say(name, m.text, radio ? 'radio' : 'talk', m.dur || 4);
+      if (radio) sound.radio();
+      voice.say(m.text, radio ? 'radio' : m.who, { salt: m.who?.length || 0 });
+    };
+    this.sayTimers = (this.sayTimers || []).filter(Boolean);
+    if (m.delay) this.sayTimers.push(setTimeout(go, m.delay * 1000)); else go();
+  }
+
+  onBark(m) {
+    const me = this.pos();
+    if (Math.hypot(m.x - me.x, m.z - me.z) > 22) return;
+    this.hud.say('', m.text, 'bark', 2.2);
+    if (Math.random() < 0.5) voice.say(m.text, m.cop ? 'cop' : 'ped', { salt: Math.floor(m.x) });
+  }
+
+  onBanner(m) {
+    this.hud.banner(m.text, m.sub, m.kind);
+    if (m.kind === 'passed' || m.kind === 'failed' || m.kind === 'wasted' || m.kind === 'busted') sound.jingle(m.kind);
+    if (m.kind === 'mission') sound.jingle('missionStart');
+    if (m.kind === 'tape') sound.jingle('tape');
   }
 
   onFx(m) {
-    const door = m.door ? DOORS.find((d) => d.id === m.door) : null;
-    const at = door ? DOOR_SPOT(door) : m.x != null ? { x: m.x, y: 1.2, z: m.z } : null;
+    const F = this.fx, me = this.me;
     switch (m.k) {
-      case 'open':
-        if (door.kind === 'gate') sound.gate(at, 2.2, true); else sound.doorCreak(0.8, 1, at);
-        break;
-      case 'shut':
-        if (door.kind === 'gate') sound.gate(at, 2.2, false); else setTimeout(() => sound.shut(0.9, at), 350);
-        break;
-      case 'lock': case 'unlock':
-        if (door.kind === 'gate') sound.padlock(m.k === 'lock', at); else sound.bolt(m.k === 'lock', at);
-        if (m.by === 'nobody') this.hud.toast(`The alarm panel chirps: ${NAMES[m.door]} just came unlocked. Nobody's near it.`);
-        break;
-      case 'locked': sound.locked(at); break;
-      case 'rattle': sound.rattle(at); sound.gate(at, 1.2, true); break;
-      case 'creak': sound.doorCreak(1.2, 0.8, at); break;
-      case 'break': sound.splinter(at); this.hud.flash('THE DOOR'); this.fear = 1; break;
-      case 'bang': sound.bang(at); this.fear = Math.max(this.fear, 0.6); break;
-      case 'tap': sound.tapGlass(at); break;
-      case 'knock': sound.knock(at, 3, 1); break;
-      case 'keys': sound.keys(at, 7); break;
-      case 'panel': sound.panelBeep(); break;
-      case 'punch': {
-        const s = STATIONS[m.n - 1];
-        sound.punch({ x: s.x, y: s.y, z: s.z });
-        const st = this.world.stations[m.n - 1];
-        if (st) { const k = st.userData.key; k.rotation.z = 0; let a = 0; const spin = () => { a += 0.25; k.rotation.z = a; if (a < Math.PI / 2) requestAnimationFrame(spin); else k.rotation.z = 0; }; spin(); }
+      case 'shot': {
+        const [ox, oy, oz] = m.o, [ex, ey, ez] = m.e;
+        if (m.by !== me) {
+          const dx = ex - ox, dz = ez - oz, d = Math.hypot(dx, dz) || 1;
+          F.muzzle(ox, oy, oz, dx / d, dz / d);
+          F.tracer([ox, oy, oz], [ex, ey, ez]);
+          sound.gun(m.w, { x: ox, y: oy, z: oz });
+          // other players' characters flinch their guns
+        }
+        if (m.hit) { F.impact(ex, ey, ez, m.hit); sound.ricochet({ x: ex, y: ey, z: ez }, m.hit); }
         break;
       }
-      case 'breaker': sound.breaker(!m.off, at); if (m.off && m.id !== 'cams') sound.powerDown(); break;
-      case 'power': sound.powerDown(); this.hud.flash('POWER'); this.fear = Math.max(this.fear, 0.7); break;
-      case 'paOff': sound.stopMuzak(0.5); this.paOn = false; break;
-      case 'paCrackle': sound.static(1.5); break;
-      case 'carousel': this.hud.toast('From the food court: music. The carousel is turning.'); break;
-      case 'carouselOff': break;
-      case 'static': sound.static(3); break;
-      case 'saw':
-        if (m.id === this.me) { sound.stinger(0.8); this.fear = Math.max(this.fear, 0.8); }
-        break;
-      case 'spotted':
-        if (m.id === this.me) { sound.stinger(1.3); this.hud.flash('IT SEES YOU'); this.fear = 1; }
-        break;
-      case 'stun': sound.gasp(); if (m.by === this.me) this.hud.toast('It flinches from the light, hands over its face.'); break;
-      case 'hideIn': sound.doorCreak(0.5, 1.3, HIDES.find((h) => h.id === m.id)); break;
-      case 'hideOut': sound.doorCreak(0.5, 1.2, HIDES.find((h) => h.id === m.id)); break;
-      case 'lockerOpen': sound.bolt(false, SPOTS.locker); this.world.live.lockers?.userData.doors[2] && (this.world.live.lockers.userData.doors[2].rotation.y = -1.6); break;
-      case 'wrongCode': sound.buzz(); if (this.panelKind === 'keypad') { this.keypad = ''; this.renderKeypad('WRONG'); } break;
+      case 'boom': F.explosion(m.x, m.z); sound.explosion({ x: m.x, z: m.z }); { const me2 = this.pos(); const d = Math.hypot(m.x - me2.x, m.z - me2.z); this.shake = Math.min(1.5, this.shake + Math.max(0, 1.4 - d / 40)); } break;
+      case 'crash': sound.crash({ x: m.x, z: m.z }, m.n); F.puff(m.x, 0.8, m.z, [0.5, 0.48, 0.45]); break;
+      case 'thud': sound.thud({ x: m.x, z: m.z }, m.n); break;
+      case 'punch': { if (m.id !== me) { const O = this.others.get(m.id); if (O) O.view.rig.punch(); } const p = this.others.get(m.id)?.view || this.myView; sound.punch({ x: p.x, z: p.z }, m.hit); break; }
+      case 'pickup': if (m.id === me) { sound.jingle(m.kind === 'cash' ? 'cash' : 'pickup'); } F.sparkle(m.x, 1, m.z); break;
+      case 'wanted': if (m.id === me && m.n > 0) sound.jingle('wanted'); break;
+      case 'alarm': { const C = this.cars.get(m.car); if (C) sound.alarm({ x: C.view.x, z: C.view.z }); break; }
+      case 'horn': { const C = this.cars.get(m.car); if (C && !(this.myCar && this.myCar.id === m.car)) sound.horn({ x: C.view.x, z: C.view.z }, 0.5); break; }
+      case 'smash': F.puff(m.x, 0.6, m.z, [0.45, 0.35, 0.2]); F.explosion(m.x, m.z); sound.crash({ x: m.x, z: m.z }, 0.8); break;
+      case 'grab': if (m.id === me) { sound.crash(null, 0.3); this.shake = 1; } break;
+      case 'collapse': for (const P of this.peds.values()) if (P.look === LOOK_MQ || P.look === LOOK_MQ2) this.fx.puff(P.view.x, 1, P.view.z, [0.9, 0.88, 0.85]); break;
+      case 'missionStart': case 'passed': case 'failed': break;
+      case 'checkpoint': sound.jingle('checkpoint'); break;
+      default:
     }
   }
 
-  onClue(k) {
-    if (this.clues.has(k)) return;
-    this.clues.add(k);
-    if (CLUES[k]) this.hud.toast(`In your notes: ${CLUES[k].title}. [J]`);
-  }
-
-  onReport(m) {
-    this.report.open = m.open;
-    this.report.answers = m.answers;
-    if (this.mode === 'panel' && this.panelKind === 'notes') this.renderNotes();
-    else if (m.open && !m.by && (this.mode === 'play' || this.mode === 'cctv')) { if (this.mode === 'cctv') this.leaveCctv(); this.openNotes(); }
-  }
-
-  teleport(m) {
-    const p = this.p;
-    p.x = m.x; p.z = m.z;
-    p.vx = p.vz = 0;
-  }
-
-  setHide(id) {
-    this.hide = id;
-    if (id) {
-      const v = hideView(id);
-      this.mode = 'hidden';
-      this.p.ry = v.ry;
-      this.p.rx = 0;
-      this.hideBase = v;
-      this.p.flash = false;
-      this.closePanel();
-    } else if (this.mode === 'hidden') this.mode = 'play';
-  }
-
-  endIntro() {
-    this.cutscene.finish();
-    this.hud.cinematic(false);
-    this.hud.prompt(null);
-    this.fx.bars = 0;
-    this.mode = 'play';
-    this.world.setBreakers(this.breakers, (this.flags & 2) !== 0, { force: true });
-    for (const a of this.avatars.values()) a.snapNext = true;
-    const spot = START_SPOTS[this.myIndex % 4];
-    this.p.x = spot.x; this.p.z = spot.z;
-    // facing the south doors he just left by
-    this.p.ry = Math.atan2(spot.x - 0, spot.z - 16);
-    if (this.manager) { this.manager.dispose(); this.manager = null; }
-    sound.stopMuzak(2);
-  }
-
-  onTaken(m) {
-    if (m.id === this.me) { this.startTaken(m.by); return; }
-    this.hud.toast(`${this.nameOf(m.id)} is gone.`);
-    sound.gasp();
-    if (this.viewing && this.viewing.id === m.id) this.viewing = null;
-    this.updateTeam();
-  }
-
-  send() {
-    const p = this.p;
-    this.link.send({
-      t: 'st', x: +p.x.toFixed(2), z: +p.z.toFixed(2), ry: +p.ry.toFixed(3), rx: +p.rx.toFixed(3),
-      mv: p.mv, fl: p.flash && this.mode !== 'cctv' ? 1 : 0, cr: p.crouch ? 1 : 0, cam: this.mode === 'cctv' ? this.camIdx : -1,
-    });
-  }
-
-  // --------------------------------------------------------------- tick --
-  update(dt) {
-    dt = Math.min(dt, 0.1);
-    this.t += dt;
-    const inp = this.input, p = this.p;
-    const sens = 0.0022 * this.settings.sens;
-    const inv = this.settings.invert ? -1 : 1;
-    if ((this.mode === 'play' || this.mode === 'hidden') && inp.locked) {
-      p.ry -= inp.mx * sens;
-      p.rx -= inp.my * sens * inv;
-      p.rx = Math.max(-1.45, Math.min(1.45, p.rx));
-      if (this.mode === 'hidden' && this.hideBase) {
-        let d = p.ry - this.hideBase.ry;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        p.ry = this.hideBase.ry + Math.max(-0.7, Math.min(0.7, d));
-        p.rx = Math.max(-0.5, Math.min(0.5, p.rx));
-      }
-    }
-
-    switch (this.mode) {
-      case 'intro': this.updateIntro(dt); break;
-      case 'play':
-        this.move(dt);
-        this.interact();
-        this.keys();
-        break;
-      case 'hidden':
-        if (inp.hit('KeyE')) this.link.send({ t: 'use', k: `hide:${this.hide}` });
-        this.panelKeys();
-        break;
-      case 'cctv': this.updateCctv(); break;
-      case 'panel': this.updatePanel(); break;
-      case 'taken': this.updateTaken(dt); break;
-      case 'spectate': this.updateSpectate(); break;
-    }
-
-    for (const a of this.avatars.values()) a.update(dt);
-    const me = this.camera.position;
-    if (this.stalker) this.stalker.update(dt, this.t, me);
-    // Dale, shut away somewhere, is only drawn (and posed) when you're near
-    const view = this.mode === 'cctv' ? this.cctv.cams[this.camIdx].position : me;
-    const daleNear = this.daleMode !== 'trapped' || this.dale.fresh || Math.hypot(view.x - this.dale.x, view.z - this.dale.z) < 18;
-    this.dale.root.visible = daleNear;
-    if (daleNear) this.dale.update(dt, this.t, this.daleMode === 'trapped' ? null : me);
-    if (this.manager) this.manager.update(dt, this.t, me);
-    this.stepSounds(dt);
-
-    this.sendT -= dt;
-    if (this.sendT <= 0 && ['play', 'cctv', 'panel', 'hidden'].includes(this.mode)) {
-      this.sendT = 0.05;
-      this.send();
-    }
-    this.placeCamera(dt);
-    this.lookAround(dt);
-    this.updateWorld(dt);
-    this.updateMood(dt);
-    this.updateFx(dt);
-    this.updateHud();
-    inp.endFrame();
-  }
-
-  placeCamera(dt) {
-    const cam = this.camera, p = this.p;
-    if (this.mode === 'intro') {
-      cam.position.copy(this.cutscene.pos);
-      cam.lookAt(this.cutscene.lookAt);
-    } else if (this.mode === 'spectate' && this.viewing) {
-      const v = this.viewing;
-      cam.position.set(v.x, EYE, v.z);
-      cam.rotation.set(v.rx * 0.8, v.ry, 0);
-    } else if (this.mode === 'hidden' && this.hideBase) {
-      cam.position.set(this.hideBase.x, this.hideBase.y, this.hideBase.z);
-      cam.rotation.set(p.rx, p.ry, 0);
-    } else if (this.mode !== 'taken') {
-      const speed = Math.hypot(p.vx, p.vz);
-      const bob = this.mode === 'play' ? Math.abs(Math.sin((p.stepDist / (p.mv === 2 ? 0.95 : 0.72)) * Math.PI)) * 0.035 * Math.min(1, speed / 2.5) : 0;
-      p.eye = lerp(p.eye, p.crouch ? 1.05 : EYE, 1 - Math.exp(-dt * 10));
-      cam.position.set(p.x, p.eye + bob, p.z);
-      cam.rotation.set(p.rx, p.ry, 0);
-    }
-    cam.updateMatrixWorld();
-    sound.setListener(cam);
-  }
-
-  // ---------------------------------------------------------- the intro --
-  updateIntro(dt) {
-    this.cutscene.update(dt);
-    this.fx.fade = lerp(this.fx.fade, this.fadeTo, 1 - Math.exp(-dt * 1.5));
-    if (this.isHost) {
-      this.skipHeld = this.input.down('Space') ? (this.skipHeld || 0) + dt : 0;
-      if (this.skipHeld > 0.6 && !this.skipSent) {
-        this.skipSent = true;
-        this.link.send({ t: 'skip' });
-      }
-    }
-  }
-
-  // ---------------------------------------------------------- walking --
-  move(dt) {
-    const inp = this.input, p = this.p;
-    const f = (inp.down('KeyW') || inp.down('ArrowUp') ? 1 : 0) - (inp.down('KeyS') || inp.down('ArrowDown') ? 1 : 0);
-    const s = (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0) - (inp.down('KeyA') || inp.down('ArrowLeft') ? 1 : 0);
-    const len = Math.hypot(f, s);
-    if (inp.hit('KeyC') || inp.hit('ControlLeft')) p.crouch = !p.crouch;
-    const sprint = (inp.down('ShiftLeft') || inp.down('ShiftRight')) && f > 0 && !p.tired && !p.crouch;
-    if (sprint && len > 0) {
-      p.stamina = Math.max(0, p.stamina - dt);
-      if (p.stamina <= 0) { p.tired = true; sound.breath(true, 0.8); }
+  onEntered(m) {
+    this.pending = null;
+    const C = this.cars.get(m.car);
+    sound.door();
+    if (m.seat === 0) {
+      const v = C ? C.track.at(this.renderT()) : null;
+      const cs = m.cs || (v ? [v[0], v[1], v[2], 0, 0, 0, 0] : [this.p.x, this.p.z, 0, 0, 0, 0, 0]);
+      const c = makeCar(m.car, C ? C.type : 'sedan', cs[0], cs[1], cs[2]);
+      c.v = cs[3] || 0; c.s = cs[4] || 0; c.w = cs[5] || 0; c.steer = cs[6] || 0;
+      this.myCar = { id: m.car, c };
+      this.camYaw = c.h + Math.PI;
+      this.hud.carName(CAR_TYPES[c.type].name);
     } else {
-      p.stamina = Math.min(STAMINA_MAX, p.stamina + dt * STAMINA_REGEN);
-      if (p.tired && p.stamina > 1.5) p.tired = false;
+      this.ride = { id: m.car, seat: m.seat };
+      if (C) this.hud.carName(CAR_TYPES[C.type].name);
     }
-    const speed = p.crouch ? CROUCH : sprint && len > 0 ? SPRINT : WALK;
-    let wx = 0, wz = 0;
-    if (len > 0) {
-      const fx = -Math.sin(p.ry), fz = -Math.cos(p.ry);
-      const rx = Math.cos(p.ry), rz = -Math.sin(p.ry);
-      wx = ((fx * f + rx * s) / len) * speed;
-      wz = ((fz * f + rz * s) / len) * speed;
-    }
-    const k = 1 - Math.exp(-dt * 12);
-    p.vx = lerp(p.vx, wx, k);
-    p.vz = lerp(p.vz, wz, k);
-    const ox = p.x, oz = p.z;
-    const pos = { x: p.x + p.vx * dt, z: p.z + p.vz * dt };
-    this.solids.resolve(pos, PLAYER_R);
-    p.x = pos.x; p.z = pos.z;
-    const moved = Math.hypot(p.x - ox, p.z - oz);
-    const v = moved / dt;
-    p.mv = v > 3.2 ? 2 : v > 0.3 ? 1 : 0;
-    const stride = p.mv === 2 ? 0.95 : 0.72;
-    const before = Math.floor(p.stepDist / stride);
-    p.stepDist += moved;
-    if (Math.floor(p.stepDist / stride) !== before) sound.step(this.surface(p.x, p.z), (p.mv === 2 ? 1.1 : 0.7) * (p.crouch ? 0.35 : 1));
   }
 
-  surface(x, z) {
-    const r = roomAt(x, z);
-    if (!r) return 'concrete';
-    if (r.id === 'halv' || r.id === 'halvNorth' || ['N2', 'N5', 'N6', 'N8', 'S1', 'S5'].includes(r.id)) return 'carpet';
-    if (['stock', 'dock', 'S3'].includes(r.id)) return 'concrete';
-    if (r.id === 'freezer') return 'metal';
-    return 'hard';
+  onExited(m) {
+    this.pending = null;
+    this.myCar = null;
+    this.ride = null;
+    this.p.x = m.x; this.p.z = m.z;
+    this.p.y = 0; this.p.vy = 0;
+    sound.door();
+    sound.screech(0);
   }
 
-  // ------------------------------------------------------- using things --
-  doorPrompt(d, k) {
-    const st = doorState(this.doors[k]);
-    const moving = d.kind === 'gate' && st.open > 0.05 && st.open < 0.95 && !st.locked;
-    const keyOk = !d.key || (this.flags & 8) !== 0;
-    if (st.broken) return { e: st.open > 0.5 ? null : null, r: null, text: 'The lock is smashed.' };
-    if (d.kind === 'glass' || d.kind === 'rollup') return { e: null, r: st.locked ? '[R] Unlock' : '[R] Lock it', text: st.locked ? `${cap(d.name)} (locked)` : `${cap(d.name)} (unlocked)` };
-    if (d.kind === 'gate') {
-      if (moving) return { text: 'The gate rattles on its rollers...' };
-      if (st.open > 0.5) return { e: '[E] Pull the gate down', text: null };
-      if (st.open > 0.05) return { e: '[E] Pull it down', text: null };
-      return st.locked ? { r: '[R] Unlock the padlock', text: `${cap(d.name)}: locked` } : { e: '[E] Push the gate up', r: '[R] Lock it', text: null };
-    }
-    if (st.open > 0.3) return { e: '[E] Shut it', text: null };
-    if (st.locked) return { r: keyOk ? '[R] Unlock' : '[R] Unlock (none of your keys fit)', text: `${cap(d.name)}: locked` };
-    return { e: '[E] Open', r: '[R] Lock it', text: null };
+  onRespawn(m) {
+    this.myCar = null;
+    this.ride = null;
+    this.pending = null;
+    Object.assign(this.p, { x: m.x, z: m.z, h: m.h, y: 0, vy: 0, kx: 0, kz: 0, downT: 0 });
+    this.camYaw = m.h + Math.PI;
+    this.w = 0;
   }
 
-  // what you can use from here, as rays to test against
-  targets() {
-    const p = this.p, out = [];
-    const add = (key, at, r, label, extra = {}) => out.push({ kind: 'spot', key, pos: v3(at.x, at.y, at.z), r, label, ...extra });
-    const near = (s, d = 6) => Math.hypot(s.x - p.x, s.z - p.z) < d;
-    for (const s of STATIONS) if (near(s)) add(`station${s.n}`, s, 0.24, this.round.n ? (this.round.punched[s.n - 1] ? `${s.name}: punched this round` : `[E] Turn the key (${s.name})`) : `[E] Turn the key (${s.name})`);
-    const S = SPOTS;
-    if (near(S.monitors, 8)) {
-      add('monitors', S.monitors, 1.0, '[E] Watch the cameras');
-      add('alarmPanel', S.alarmPanel, 0.55, '[E] Read the alarm panel');
-      add('logbook', S.logbook, 0.25, '[E] Read Dale\'s logbook');
-      add('watchclock', S.watchclock, 0.25, '[E] Read the watchclock tape');
-      add('vcr', S.vcr, 0.2, '[E] Play the tape in the VCR');
-      add('keyCabinet', S.keyCabinet, 0.35, '[E] Look in the key cabinet');
-      add('locker', S.locker, 0.28, (this.flags & 8) ? 'Dale\'s locker (empty)' : '[E] Dale\'s locker: try the combination');
-      add('radio', S.radio, 0.2, '[E] The base radio');
+  credits() {
+    const lines = [['KINGSGATE NIGHTS', 'The End'], ['Thanks for playing', 'Kingsgate is still yours. Find all 13 tapes.']];
+    lines.forEach(([a, b], i) => setTimeout(() => this.hud.banner(a, b, 'credits'), 5000 + i * 4500));
+  }
+
+  // ------------------------------------------------------------ helpers
+  renderT() { return this.lastT + (performance.now() / 1000 - this.lastLocal) - DELAY; }
+  hostNow() { return this.lastT + (performance.now() / 1000 - this.lastLocal); }
+
+  // where I am (my car, the car I'm riding in, or me)
+  pos() {
+    if (this.myCar) return this.myCar.c;
+    if (this.ride) { const C = this.cars.get(this.ride.id); if (C) return { x: C.view.x, z: C.view.z, h: C.view.h }; }
+    return this.p;
+  }
+
+  alive() { return this.me$.state === 0; }
+  locked() { return this.intro >= 0 || this.mission.cut || !this.alive() || this.mapOpen || this.shopOpen; }
+
+  // weapons I have, in order
+  owned() { return WEAPONS.map((w, k) => k).filter((k) => k === 0 || this.me$.ammo[k] > 0 || this.me$.ammo[k] === -2); }
+
+  // the cars near a point, as plain boxes (for my own car's collisions)
+  nearCars(x, z, r, skip = null) {
+    const out = [];
+    for (const [id, C] of this.cars) {
+      if (id === skip) continue;
+      const v = C.view;
+      if (Math.abs(v.x - x) > r || Math.abs(v.z - z) > r) continue;
+      const T = CAR_TYPES[C.type];
+      out.push({ id, x: v.x, z: v.z, h: v.h, hl: T.len / 2, hw: T.wid / 2, ht: T.ht, type: C.type, v: C.v || 0, s: 0 });
     }
-    if (near(S.breaker, 6)) add('breaker', S.breaker, 1.0, '[E] Open the breaker panel');
-    if (near(S.pa)) add('pa', S.pa, 0.3, (this.flags & 1) ? '[E] Turn off the PA' : 'The PA system');
-    if (near(S.lostFound)) add('lostFound', S.lostFound, 0.4, '[E] Look in the lost and found');
-    if (near(S.photos) && !this.clues.has('photos')) add('photos', S.photos, 0.25, '[E] An envelope: MERCER, D. (24 exp.)');
-    if (near(S.inventory)) add('inventory', S.inventory, 0.25, '[E] Read the clipboard');
-    if (near(S.carousel) && (this.flags & 2)) add('carousel', S.carousel, 0.4, '[E] Turn off the carousel');
-    for (const h of HIDES) if (near(h, 3)) add(`hide:${h.id}`, { x: h.x, y: 1.0, z: h.z }, 0.6, `[E] Hide in ${h.name}`);
     return out;
   }
 
-  // the door or gate you're looking at, if any: where the view ray meets
-  // its opening, within reach
-  doorTarget(o, dir) {
-    let best = null, bd = REACH + 0.6;
-    DOORS.forEach((d, k) => {
-      if (Math.hypot(d.x - o.x, d.z - o.z) > d.w / 2 + 4) return;
-      // the plane of the opening
-      const n = d.axis === 'x' ? [0, 1] : [1, 0];
-      const den = dir.x * n[0] + dir.z * n[1];
-      if (Math.abs(den) < 1e-4) return;
-      const tt = ((d.axis === 'x' ? d.at - o.z : d.at - o.x)) / den;
-      if (tt < 0.1 || tt > bd) return;
-      const hx = o.x + dir.x * tt, hy = o.y + dir.y * tt, hz = o.z + dir.z * tt;
-      const along = d.axis === 'x' ? hx : hz;
-      if (along < d.a - 0.15 || along > d.b + 0.15 || hy < -0.1 || hy > d.h + 0.4) return;
-      bd = tt;
-      best = { kind: 'door', key: d.id, k, d, dist: tt };
-    });
+  // ------------------------------------------------------------ the frame
+  update(dt) {
+    const I = this.input;
+    this.T = this.hostNow();
+    // mouse: the camera
+    if (I.locked && !this.mapOpen && !this.shopOpen) {
+      const k = 0.0022 * this.settings.sens * (this.aim ? 0.6 : 1);
+      this.camYaw -= I.mx * k;
+      this.camPitch += I.my * k * (this.settings.invert ? -1 : 1);
+      this.camPitch = Math.max(-0.75, Math.min(1.25, this.camPitch));
+      if (I.mx || I.my) this.camLook = 0;
+    }
+    this.camLook += dt;
+    this.handleKeys(dt);
+    if (this.myCar) this.drive(dt);
+    else if (!this.ride) this.walk(dt);
+    this.combat(dt);
+    // tell the host where we are
+    this.sendT -= dt;
+    if (this.sendT <= 0) { this.sendT = TICK; this.send(); }
+    this.updateViews(dt);
+    this.placeCamera(dt);
+    this.updateHud(dt);
+    this.updateSound(dt);
+    this.fx.update(dt);
+    this.world.update(this.T);
+    I.endFrame();
+  }
+
+  handleKeys(dt) {
+    const I = this.input;
+    if (I.hit('KeyM') && !this.shopOpen) this.toggleMap();
+    if (this.mapOpen && I.hit('Escape')) this.toggleMap();
+    if (I.hit('Space') && (this.intro >= 0 || this.mission.cut)) this.link.send({ t: 'skip' });
+    if (this.locked()) return;
+    // in and out of cars
+    if (I.hit('KeyF') && !this.pending) {
+      if (this.myCar || this.ride) { this.link.send({ t: 'exit' }); this.pending = 'exit'; setTimeout(() => { if (this.pending === 'exit') this.pending = null; }, 1500); } else {
+        const near = this.nearestCar();
+        if (near) { this.link.send({ t: 'enter', car: near.id }); this.pending = 'enter'; setTimeout(() => { if (this.pending === 'enter') this.pending = null; }, 1500); }
+      }
+    }
+    // weapons: Q / E / the wheel
+    const step = (I.hit('KeyE') && !this.atShop() ? 1 : 0) - (I.hit('KeyQ') ? 1 : 0) + (I.wheel > 0 ? 1 : I.wheel < 0 ? -1 : 0);
+    if (step && !this.myCar) {
+      const list = this.owned();
+      const i = Math.max(0, list.indexOf(this.w));
+      this.w = list[(i + step + list.length) % list.length];
+      sound.click();
+    }
+    for (let k = 0; k < 4; k++) if (I.hit(`Digit${k + 1}`) && this.owned().includes(k) && !this.shopOpen) this.w = k;
+    if (this.myCar) {
+      if (I.hit('KeyH')) { this.link.send({ t: 'horn' }); sound.horn(null, 0.5, 1); }
+      if (I.hit('KeyG') && this.myCar.c.type === 'police') this.link.send({ t: 'siren' });
+      if (I.hit('KeyR')) { this.radioOn = !this.radioOn; if (this.radioOn) sound.nextSong(); }
+    }
+    // the gun shop
+    if (I.hit('KeyE') && this.atShop() && !this.myCar) this.openShop(true);
+  }
+
+  nearestCar() {
+    let best = null, bd = Infinity;
+    for (const [id, C] of this.cars) {
+      if (C.flags & 8) continue;
+      const v = C.view;
+      const d = Math.hypot(v.x - this.p.x, v.z - this.p.z);
+      if (d < REACH + CAR_TYPES[C.type].len / 2 && d < bd) { bd = d; best = { id, C }; }
+    }
+    return best;
+  }
+  atShop() { const G = PLACES.guns; return !this.myCar && !this.ride && Math.hypot(this.p.x - G.x, this.p.z - G.z) < 2.6; }
+
+  // ------------------------------------------------------------ on foot
+  walk(dt) {
+    const I = this.input, p = this.p;
+    const can = !this.locked() && p.downT <= 0;
+    let fx = 0, fz = 0;
+    if (can) {
+      fz = (I.down('KeyW') || I.down('ArrowUp') ? 1 : 0) - (I.down('KeyS') || I.down('ArrowDown') ? 1 : 0);
+      fx = (I.down('KeyD') || I.down('ArrowRight') ? 1 : 0) - (I.down('KeyA') || I.down('ArrowLeft') ? 1 : 0);
+    }
+    const y = this.camYaw;
+    const fwdX = -Math.sin(y), fwdZ = -Math.cos(y), rX = Math.cos(y), rZ = -Math.sin(y);
+    let mx = fwdX * fz + rX * fx, mz = fwdZ * fz + rZ * fx;
+    const ml = Math.hypot(mx, mz);
+    const carry = this.me$.carry;
+    let speed = 0;
+    if (ml > 0) {
+      mx /= ml; mz /= ml;
+      speed = this.aim ? WALK * 1.4 : carry ? WALK * 1.3 : I.down('ShiftLeft') || I.down('ShiftRight') ? SPRINT : I.down('AltLeft') ? WALK : JOG;
+    }
+    // knocked flying
+    if (p.downT > 0) {
+      p.downT -= dt;
+      p.x += p.kx * dt; p.z += p.kz * dt;
+      p.kx *= Math.exp(-3 * dt); p.kz *= Math.exp(-3 * dt);
+    }
+    p.x += mx * speed * dt;
+    p.z += mz * speed * dt;
+    p.speed += (speed - p.speed) * Math.min(1, dt * 10);
+    // facing: where you're going, or where you aim
+    const aimH = Math.atan2(fwdX, fwdZ);
+    if (this.aim || (this.firing && this.w !== 0)) p.h = lerpA(p.h, aimH, Math.min(1, dt * 18));
+    else if (ml > 0) p.h = lerpA(p.h, Math.atan2(mx, mz), Math.min(1, dt * 12));
+    // jumping
+    const ground = groundY(p.x, p.z);
+    if (can && I.hit('Space') && p.y <= 0.001) p.vy = JUMP_V;
+    p.vy -= GRAVITY * dt;
+    p.y = Math.max(0, p.y + p.vy * dt);
+    if (p.y <= 0) p.vy = 0;
+    // walls, cars
+    this.solids.resolveCircle(p, PLAYER_R, p.y, true);
+    for (const c of this.nearCars(p.x, p.z, 5)) {
+      const h = circleVsCar(p.x, p.z, PLAYER_R, c);
+      if (h && p.y < 1.2) { p.x += h.nx * h.depth; p.z += h.nz * h.depth; }
+    }
+    p.ground = ground;
+    p.anim = p.y > 0.05 ? AN.jump : this.aim && this.w ? AN.aim : speed > JOG + 0.5 ? AN.run : speed > WALK + 0.5 ? AN.run : speed > 0 ? AN.walk : AN.idle;
+    // footsteps
+    this.stepAcc += speed * dt;
+    if (this.stepAcc > (speed > JOG ? 1.6 : 1.3) && p.y <= 0.01) { this.stepAcc = 0; sound.step(null, speed > JOG); }
+  }
+
+  // ------------------------------------------------------------ driving
+  drive(dt) {
+    const I = this.input, M = this.myCar, c = M.c;
+    const can = !this.locked();
+    const thr = can ? (I.down('KeyW') || I.down('ArrowUp') ? 1 : 0) - (I.down('KeyS') || I.down('ArrowDown') ? 1 : 0) : 0;
+    const st = can ? (I.down('KeyD') || I.down('ArrowRight') ? 1 : 0) - (I.down('KeyA') || I.down('ArrowLeft') ? 1 : 0) : 0;
+    const hb = can && I.down('Space');
+    const C = this.cars.get(M.id);
+    if (C && C.hp <= 0) c.dead = true;
+    const env = this.carEnv || (this.carEnv = { solids: this.solids, cars: [], onHit: (car, impact) => {
+      if (impact > 3) {
+        this.shake = Math.min(1.2, this.shake + impact / 25);
+        sound.crash(null, Math.min(1, impact / 20));
+        if (this.crashT <= 0) { this.link.send({ t: 'crash', n: impact }); this.crashT = 0.3; }
+      }
+    } });
+    env.cars = this.nearCars(c.x, c.z, 14, M.id);
+    this.crashT -= dt;
+    // small steps for a steady drive at any frame rate
+    const n = Math.ceil(dt / (1 / 60));
+    for (let k = 0; k < n; k++) stepCar(c, { throttle: thr, steer: st, handbrake: hb }, dt / n, env);
+    this.throttle = thr;
+    this.handbrake = hb;
+    this.p.x = c.x; this.p.z = c.z; this.p.h = c.h;
+  }
+
+  // ------------------------------------------------------------ shooting
+  combat(dt) {
+    const I = this.input;
+    const canShoot = !this.locked() && !this.myCar && this.p.downT <= 0;
+    this.aim = canShoot && I.buttons.has(2) && this.w !== 0;
+    this.firing = false;
+    if (!canShoot) return;
+    const W = WEAPONS[this.w];
+    const held = I.buttons.has(0), click = I.clicks > 0;
+    if (W.melee) {
+      if (click && this.T - this.lastShot > 0.4 && !this.ride) { this.lastShot = this.T; this.link.send({ t: 'punch' }); this.myView.rig.punch(); }
+      return;
+    }
+    if (!(W.auto ? held : click)) return;
+    this.firing = true;
+    if (this.T - this.lastShot < 1 / W.rate) return;
+    if (this.T < this.reloadUntil) return;
+    if (this.me$.ammo[this.w] <= 0) { if (click) sound.click(); return; }
+    this.lastShot = this.T;
+    // where the crosshair is pointing
+    const cam = this.camera;
+    const o = cam.position, d = cam.getWorldDirection(new THREE.Vector3());
+    const t = this.aimRay(o, d, 140);
+    const aimPt = o.clone().addScaledVector(d, t);
+    // the muzzle: in front of you at chest height (or out of the car window)
+    const src = this.pos();
+    const h = Math.atan2(d.x, d.z);
+    const mz = new THREE.Vector3(src.x + Math.sin(h) * 0.5 + Math.cos(h) * -0.22, (this.ride ? 1.3 : 1.42 + this.p.y + (this.p.ground || 0)), src.z + Math.cos(h) * 0.5 - Math.sin(h) * -0.22);
+    const dir = aimPt.clone().sub(mz).normalize();
+    this.link.send({ t: 'fire', w: this.w, o: [r2(mz.x), r2(mz.y), r2(mz.z)], d: [r3(dir.x), r3(dir.y), r3(dir.z)] });
+    this.fx.muzzle(mz.x, mz.y, mz.z, dir.x, dir.z);
+    this.fx.tracer([mz.x, mz.y, mz.z], [aimPt.x, aimPt.y, aimPt.z]);
+    sound.gun(this.w, null, true);
+    this.camPitch -= (this.w === 3 ? 0.05 : 0.018);
+    this.shake = Math.min(1, this.shake + (this.w === 3 ? 0.3 : 0.08));
+  }
+
+  // how far the crosshair's ray goes before it hits something
+  aimRay(o, d, range) {
+    let best = range;
+    const wall = this.solids.ray(o.x, o.y, o.z, d.x, d.y, d.z, range);
+    if (wall) best = wall.t;
+    const skip = this.myCar?.id ?? this.ride?.id;
+    for (const [id, C] of this.cars) {
+      if (id === skip) continue;
+      const v = C.view;
+      const T = CAR_TYPES[C.type];
+      const t = rayCar(o.x, o.y, o.z, d.x, d.y, d.z, { x: v.x, z: v.z, h: v.h, hl: T.len / 2, hw: T.wid / 2, ht: T.ht }, best);
+      if (t >= 0 && t < best) best = t;
+    }
+    for (const P of this.peds.values()) {
+      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: P.view.x, z: P.view.z, y: 0 }, best);
+      if (t > 1.5 && t < best) best = t;
+    }
+    for (const O of this.others.values()) {
+      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: O.view.x, z: O.view.z, y: 0 }, best);
+      if (t > 1.5 && t < best) best = t;
+    }
     return best;
   }
 
-  interact() {
-    const inp = this.input, p = this.p;
-    if (inp.hit('KeyF')) { p.flash = !p.flash; sound.click(); }
-    const cam = this.camera, o = cam.position, dir = cam.getWorldDirection(this.tmp);
-    let best = null, bestScore = Infinity;
-    for (const c of this.targets()) {
-      if (!c.label) continue;
-      const v = c.pos.clone().sub(o);
-      const along = v.dot(dir);
-      if (along < 0.1 || along > REACH) continue;
-      const perp = v.clone().sub(dir.clone().multiplyScalar(along)).length();
-      const r = c.r + along * 0.02;
-      if (perp > r) continue;
-      const score = perp / r + along * 0.05;
-      if (score < bestScore) { bestScore = score; best = c; }
+  send() {
+    if (!this.alive()) return;
+    const p = this.p;
+    const msg = { t: 'st', x: r2(p.x), z: r2(p.z), y: r2(p.y), h: r2(p.h), v: r2(p.speed), a: p.anim, ay: r2(this.camYaw), ap: r2(this.camPitch), aim: this.aim, w: this.w };
+    if (this.myCar) {
+      const c = this.myCar.c;
+      msg.cs = [r2(c.x), r2(c.z), r3(c.h), r2(c.v), r2(c.s), r3(c.w), r3(c.steer)];
+      msg.lights = 1;
     }
-    const door = this.doorTarget(o, dir);
-    if (door && (!best || door.dist < best.pos.distanceTo(o) - 0.2)) best = door;
-    this.target = best;
-    // R is always for the door or gate in front of you
-    this.doorInView = door;
-    if (door && best !== door && inp.hit('KeyR') && this.doorPrompt(door.d, door.k).r) this.link.send({ t: 'lock', k: door.key });
-    if (!best) return;
-    if (best.kind === 'door') {
-      const pr = this.doorPrompt(best.d, best.k);
-      if (inp.hit('KeyE')) {
-        if (best.d.kind === 'glass' || best.d.kind === 'rollup') this.link.send({ t: 'use', k: `door:${best.key}` });
-        else if (pr.e) this.link.send({ t: 'use', k: `door:${best.key}` });
-        else if (doorState(this.doors[best.k]).locked) sound.locked(DOOR_SPOT(best.d));
+    this.link.send(msg);
+  }
+
+  // ------------------------------------------------------------ drawing
+  updateViews(dt) {
+    const rt = this.renderT();
+    const me = this.pos();
+    const t = this.T;
+    // cars
+    for (const [id, C] of this.cars) {
+      const v = C.view;
+      let x, z, h, spd, steer, slip = 0;
+      if (this.myCar && this.myCar.id === id) {
+        const c = this.myCar.c;
+        x = c.x; z = c.z; h = c.h; spd = c.v; steer = c.steer; slip = c.s;
+        v.braking = this.throttle < 0 && c.v > 0.5;
+      } else {
+        const s = C.track.at(rt);
+        if (!s) continue;
+        [x, z, h, spd, steer, slip] = s;
+        C.v = spd;
       }
-      if (inp.hit('KeyR') && pr.r) this.link.send({ t: 'lock', k: best.key });
+      const dist = Math.hypot(x - me.x, z - me.z), far = dist > 220;
+      v.root.visible = !far;
+      if (far) continue;
+      v.near = dist < 70;
+      v.place(x, z, h, spd, steer, C.flags | (this.myCar && this.myCar.id === id ? 2 : 0), dt, t);
+      // smoke and flames
+      const T = CAR_TYPES[C.type];
+      const fire = (C.flags & 4) !== 0, dead = (C.flags & 8) !== 0;
+      const fwd = [Math.sin(h) * T.len * 0.35, Math.cos(h) * T.len * 0.35];
+      if (fire) this.fx.fire(x + fwd[0], z + fwd[1]);
+      else if (dead) { if (Math.random() < 0.08) this.fx.carSmoke(x, z, true); } else if (C.hp < T.hp * 0.4 && Math.random() < 0.25) this.fx.carSmoke(x + fwd[0], z + fwd[1], C.hp < T.hp * 0.2);
+      // somebody at the wheel (close enough to see)
+      const showDriver = (C.flags & 32) !== 0 && C.driverLook >= 0 && Math.hypot(x - me.x, z - me.z) < 35;
+      let d = this.drivers.get(id);
+      if (showDriver && !d) { d = new PersonView(this.world.scene, C.driverLook); this.drivers.set(id, d); }
+      if (!showDriver && d) { d.dispose(); this.drivers.delete(id); d = null; }
+      if (d) this.seat(d, x, z, h, 0, C.type, dt);
+    }
+    // people
+    for (const P of this.peds.values()) {
+      const s = P.track.at(rt);
+      if (!s) continue;
+      const d = Math.hypot(s[0] - me.x, s[1] - me.z);
+      const v = P.view;
+      v.root.visible = d < 90;
+      if (d >= 90) continue;
+      v.set(s[0], s[1], s[2], P.anim, P.w, s[3]);
+      // far ones move their limbs less often
+      P.skip = (P.skip || 0) + 1;
+      if (d > 40 && P.skip % 3) { v.root.position.set(s[0], groundY(s[0], s[1]), s[1]); v.root.rotation.y = s[2]; continue; }
+      v.update(d > 40 ? dt * 3 : dt, { y: groundY(v.x, v.z), smooth: 30 });
+    }
+    // other players
+    for (const O of this.others.values()) {
+      const s = O.track.at(rt);
+      if (!s || !O.row) continue;
+      const [, , , , , ay, ap, anim, w, hp, , car, seat, , , flags] = O.row;
+      const v = O.view;
+      const down = (flags & 3) !== 0;
+      if (car >= 0) {
+        const C = this.cars.get(car);
+        if (C) this.seat(v, C.view.x, C.view.z, C.view.h, seat, C.type, dt);
+        continue;
+      }
+      v.root.visible = true;
+      v.set(s[0], s[1], s[2], anim === 3 ? 3 : anim === 10 ? 0 : anim, w, null);
+      v.update(dt, { pose: down ? ((flags & 3) === 2 ? 'hands' : 'collapse') : anim === 10 ? 'jump' : anim === 3 && w ? 'aim' : null, aimPitch: -ap * 0.8, y: groundY(v.x, v.z) + (s[3] || 0), smooth: 14 });
+      void ay; void hp;
+    }
+    // me
+    const mv = this.myView;
+    if (this.myCar || this.ride) {
+      const id = this.myCar ? this.myCar.id : this.ride.id;
+      const C = this.cars.get(id);
+      const c = this.myCar ? this.myCar.c : C ? { x: C.view.x, z: C.view.z, h: C.view.h } : this.p;
+      this.seat(mv, c.x, c.z, c.h, this.myCar ? 0 : this.ride.seat, C ? C.type : 'sedan', dt);
+    } else {
+      const p = this.p;
+      mv.root.visible = true;
+      mv.x = mv.tx = p.x; mv.z = mv.tz = p.z; mv.h = mv.th = p.h; mv.fresh = false;
+      mv.anim = p.anim === AN.jump ? 0 : p.anim; mv.w = this.w;
+      const pose = !this.alive() ? (this.me$.state === 2 ? 'hands' : 'collapse') : p.downT > 0 ? 'collapse' : p.anim === AN.jump ? 'jump' : (this.aim || this.firing) && this.w ? 'aim' : null;
+      if (pose === 'aim') mv.anim = 3;
+      mv.update(dt, { pose, aimPitch: -this.camPitch * 0.9, y: (p.ground || 0) + p.y, smooth: 1000 });
+      mv.speed = p.speed;
+    }
+    // job givers
+    for (const g of this.givers.values()) g.update(dt, { y: groundY(g.x, g.z) });
+    // pickups and markers turn and bob
+    for (const m of this.pickups.values()) { const s = m.userData.spin; if (s) { s.rotation.y += dt * 2; s.position.y = 1 + Math.sin(t * 3) * 0.08; } }
+    for (const m of this.markers.values()) { const s = m.userData.spin; if (s) s.rotation.y += dt * 0.5; }
+    this.updateArrows();
+  }
+
+  // a person sitting in a car (seat 0 drives, on the left)
+  seat(v, x, z, h, seat, type, dt) {
+    const T = CAR_TYPES[type];
+    const side = seat % 2 === 0 ? 1 : -1;
+    const back = seat >= 2 ? -0.9 : 0.15;
+    const lx = side * T.wid * 0.21;
+    v.root.visible = true;
+    const px = x + Math.cos(h) * lx + Math.sin(h) * back, pz = z - Math.sin(h) * lx + Math.cos(h) * back;
+    v.x = v.tx = px; v.z = v.tz = pz; v.h = v.th = h; v.fresh = false;
+    v.anim = 0;
+    v.update(dt, { pose: seat === 0 ? 'drive' : 'sit', y: (type === 'van' ? 0.55 : type === 'sports' ? 0.12 : 0.28), smooth: 1000 });
+  }
+
+  // arrows over the job's cars and targets
+  updateArrows() {
+    const want = [];
+    for (const b of this.mission.blips || []) {
+      if (b.car != null) { const C = this.cars.get(b.car); if (C) want.push({ x: C.view.x, z: C.view.z, y: CAR_TYPES[C.type].ht + 1.6, k: b.k }); }
+      if (b.ped != null) { const P = this.peds.get(b.ped); if (P) want.push({ x: P.view.x, z: P.view.z, y: 2.6, k: b.k }); }
+    }
+    while (this.arrows.length < want.length) {
+      const m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 4), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+      m.rotation.x = Math.PI;
+      this.world.scene.add(m);
+      this.arrows.push(m);
+    }
+    this.arrows.forEach((a, i) => {
+      const w = want[i];
+      a.visible = !!w;
+      if (!w) return;
+      a.position.set(w.x, w.y + Math.sin(this.T * 4) * 0.15, w.z);
+      a.rotation.y += 0.05;
+      a.material.color.set(w.k === 'enemy' ? 0xff3030 : w.k === 'friend' ? 0x40a0ff : 0x40a0ff);
+    });
+  }
+
+  placeCamera(dt) {
+    const cam = this.camera;
+    // the opening: over the city
+    if (this.intro >= 0) {
+      const a = this.intro * 0.08;
+      cam.position.set(Math.cos(a) * 150, 70 - this.intro * 2.5, Math.sin(a) * 150 + 20);
+      cam.lookAt(0, 8, 0);
+      if (!this.introShown) this.hud.banner(TITLE, `Kingsgate · ${DATE} · Space to skip`, 'title');
+      this.introShown = true;
       return;
     }
-    if (!inp.hit('KeyE') || !best.label.startsWith('[E]')) return;
-    switch (best.key) {
-      case 'monitors': this.enterCctv(); return;
-      case 'alarmPanel': this.openAlarm(); return;
-      case 'locker': this.openKeypad(); return;
-      case 'radio': this.openRadio(); return;
-      case 'breaker': this.openBreakers(); return;
-      default: this.link.send({ t: 'use', k: best.key });
-    }
-  }
-
-  // keys that work while walking about
-  keys() {
-    const inp = this.input;
-    if (inp.hit('KeyV')) { this.openRadio(); return; }
-    if (inp.hit('KeyM')) { this.openMap(); return; }
-    if (inp.hit('KeyJ')) { this.openNotes(); return; }
-    for (let i = 0; i < 4; i++) if (inp.hit(`Digit${i + 1}`) || inp.hit(`Numpad${i + 1}`)) this.link.send({ t: 'shout', k: i });
-  }
-
-  // while hidden you can still check the map and your notes, and the walkie
-  panelKeys() {
-    const inp = this.input;
-    if (inp.hit('KeyV')) this.openRadio();
-    else if (inp.hit('KeyM')) this.openMap();
-    else if (inp.hit('KeyJ')) this.openNotes();
-  }
-
-  // things you notice just by looking at them
-  lookAround(dt) {
-    this.lookT -= dt;
-    if (this.lookT > 0 || this.mode === 'intro') return;
-    this.lookT = 0.25;
-    const view = this.mode === 'cctv' ? this.cctv.cams[this.camIdx] : this.camera;
-    const c = view.position, d = view.getWorldDirection(this.tmp);
-    const looking = (x, y, z, maxD, cos = 0.97) => {
-      const v = v3(x - c.x, y - c.y, z - c.z), l = v.length();
-      return l < maxD && v.dot(d) / l > cos;
-    };
-    const send = (k) => { if (this.lookSent.has(k)) return; this.lookSent.add(k); this.link.send({ t: 'look', k }); };
-    if (this.mode === 'play') {
-      if (!(this.flags & 16) && looking(UNIFORM_HOME[0], 1.55, UNIFORM_HOME[1], 8)) {
-        send('uniform');
-        if (!this.uniformToast) { this.uniformToast = true; this.hud.toast('That one in the window is wearing a Gatehouse uniform. The name tag says MERCER.'); }
+    if (this.introShown) { this.introShown = false; this.hud.banner(null); }
+    // a job's opening words: from the side, the two of you face to face
+    const giver = this.mission.cut && !this.myCar && !this.ride ? this.givers.get(this.mission.giver) : null;
+    if (giver) {
+      const p = this.p;
+      let dx = giver.x - p.x, dz = giver.z - p.z;
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l; dz /= l;
+      p.h = Math.atan2(dx, dz);
+      giver.th = Math.atan2(-dx, -dz);
+      const mx = (p.x + giver.x) / 2, mz = (p.z + giver.z) / 2;
+      let best = null;
+      for (const side of [1, -1]) {
+        const ox = -dz * side, oz = dx * side;
+        const hit = this.solids.ray(mx, 1.6, mz, ox, 0.1, oz, 5);
+        const room = hit ? hit.t : 5;
+        if (!best || room > best.room) best = { ox, oz, room };
       }
-      if (c.z > 11 && Math.abs(c.x) < 4 && looking(5.6, 1.0, 25.5, 20, 0.9)) send('car');
+      const r = Math.max(1.4, Math.min(4.2, best.room - 0.4));
+      cam.position.set(mx + best.ox * r - dx * 0.6, 1.7, mz + best.oz * r - dz * 0.6);
+      cam.lookAt(mx, 1.4, mz);
+      if (Math.abs(cam.fov - 50) > 0.1) { cam.fov = 50; cam.updateProjectionMatrix(); }
+      this.world.head.intensity = 0;
+      return;
     }
-    if (this.stalker && (this.mode === 'play' || this.mode === 'cctv')) {
-      const s = this.stalker;
-      if (looking(s.x, 1.5, s.z, this.mode === 'cctv' ? 30 : 14, this.mode === 'cctv' ? 0.85 : 0.95)) send('stalker');
-    }
-  }
-
-  // --------------------------------------------------- the cameras --
-  enterCctv() {
-    this.mode = 'cctv';
-    this.hud.cctv(true);
-    sound.click();
-    sound.radio(0.15);
-  }
-
-  leaveCctv() {
-    this.mode = 'play';
-    this.hud.cctv(false);
-  }
-
-  updateCctv() {
-    const inp = this.input;
-    const n = CAMERAS.length;
-    if (inp.hit('KeyD') || inp.hit('ArrowRight') || inp.clicks > 0) { this.camIdx = (this.camIdx + 1) % n; sound.click(); }
-    if (inp.hit('KeyA') || inp.hit('ArrowLeft') || inp.rightClicks > 0) { this.camIdx = (this.camIdx + n - 1) % n; sound.click(); }
-    for (let i = 0; i < n; i++) if (inp.hit(`Digit${i + 1}`) || inp.hit(`Numpad${i + 1}`)) { this.camIdx = i; sound.click(); }
-    if (inp.hit('KeyE') || inp.hit('KeyQ') || inp.hit('KeyS')) this.leaveCctv();
-  }
-
-  // ------------------------------------------------------------- panels --
-  openPanel(html, cls = '', kind = null) {
-    this.hud.panel(html, cls);
-    this.mode = 'panel';
-    this.panelKind = kind;
-    this.panelOpenedAt = this.t;
-    this.lastPanelHtml = null;
-  }
-  closePanel() {
-    this.hud.panel(null);
-    this.panelKind = null;
-    if (this.mode === 'panel') this.mode = this.hide ? 'hidden' : 'play';
-  }
-  refreshPanel(html) {
-    if (html !== this.lastPanelHtml) { this.lastPanelHtml = html; this.hud.panel(html, this.panelCls || ''); }
-  }
-
-  updatePanel() {
-    const inp = this.input;
-    const kind = this.panelKind;
-    if (kind === 'radio') this.renderRadio();
-    if (kind === 'map' && this.t - (this.mapT || 0) > 0.25) { this.mapT = this.t; this.drawMapNow(); }
-    if (kind === 'alarm') this.renderAlarm();
-    if (kind === 'breakers') this.renderBreakers();
-    let k = -1;
-    for (let i = 0; i < 9; i++) if (inp.hit(`Digit${i + 1}`) || inp.hit(`Numpad${i + 1}`)) k = i;
-    if (kind === 'keypad') { this.keypadKeys(); return; }
-    if (kind === 'notes' && this.report.open && this.reportKeys(k)) return;
-    if (k >= 0 && this.panelActions && this.panelActions[k]) this.panelActions[k]();
-    const closeKeys = inp.hit('KeyE') || inp.hit('Escape') || inp.hit('KeyQ') || inp.clicks > 0
-      || (kind === 'radio' && inp.hit('KeyV')) || (kind === 'map' && inp.hit('KeyM')) || (kind === 'notes' && inp.hit('KeyJ'));
-    if (this.t - this.panelOpenedAt > 0.15 && closeKeys) this.closePanel();
-  }
-
-  openRadio() {
-    this.panelCls = '';
-    this.openPanel('<div class="sheet radio"></div>', '', 'radio');
-    sound.radio(0.2);
-    this.renderRadio();
-  }
-
-  renderRadio() {
-    const acts = [];
-    const rows = [];
-    for (const k of this.radioOpts) {
-      acts.push(() => { this.link.send({ t: 'radio', k }); this.closePanel(); });
-      rows.push(`<div><b>${acts.length}</b>${esc(RADIO_LINES[k])}</div>`);
-    }
-    if (!rows.length) rows.push('<div class="dead">Nothing to say right now.</div>');
-    this.panelActions = acts;
-    this.refreshPanel(`<div class="sheet radio"><h3>WALKIE · CH 1 · GATEHOUSE DISPATCH</h3>${rows.join('')}<div class="close">[V] PUT IT AWAY</div></div>`);
-  }
-
-  openLog() {
-    const rows = logbook(this.code ? this.code.split('').join('-') : '?-?-?').map(([d, t], i, a) => `<p class="${i === a.length - 1 ? 'last' : ''}"><b>${esc(d)}</b>${esc(t)}</p>`).join('');
-    this.panelActions = [];
-    this.openPanel(`<div class="sheet log"><h3>Kingsgate Mall · Night Security Log · D. Mercer</h3>${rows}<div class="close">[E] CLOSE THE BOOK</div></div>`, '', 'log');
-  }
-
-  openTape() {
-    const rows = (this.tape || []).map(([d, t, n, who]) => `<div><span>${esc(d)}</span><span>${esc(t)}</span><span>STA ${n}</span><span>${esc(who)}</span></div>`).join('');
-    this.panelActions = [];
-    this.openPanel(`<div class="sheet tape"><h3>DETEX WATCHCLOCK · KINGSGATE</h3><div class="head"><span>DATE</span><span>TIME</span><span>STATION</span><span>KEY</span></div>${rows}<div class="close">[E] TEAR IT OFF</div></div>`, '', 'tape');
-  }
-
-  openAlarm() {
-    this.panelActions = [];
-    this.openPanel('<div class="sheet alarm"></div>', '', 'alarm');
-    this.lastPanelHtml = null;
-    this.renderAlarm();
-  }
-
-  renderAlarm() {
-    const rows = WATCHED.map((k) => {
-      const d = DOORS[k], st = doorState(this.doors[k]);
-      const cls = st.open > 0.05 ? 'open' : st.locked ? 'ok' : 'warn';
-      const txt = st.open > 0.05 ? 'OPEN' : st.locked ? 'LOCKED' : 'UNLOCKED';
-      return `<div class="${cls}"><i></i>${esc(cap(d.name))}<span>${txt}</span></div>`;
-    }).join('');
-    const cams = this.breakers.cams;
-    this.refreshPanel(`<div class="sheet alarm"><h3>KINGSGATE · ACCESS CONTROL</h3>${cams ? `<div class="grid">${rows}</div>` : '<div class="dead">NO POWER TO PANEL (check the CCTV / ALARM breaker)</div>'}<div class="close">[E] STEP AWAY</div></div>`);
-  }
-
-  openBreakers() {
-    this.openPanel('<div class="sheet breakers"></div>', '', 'breakers');
-    this.lastPanelHtml = null;
-    this.renderBreakers();
-  }
-
-  renderBreakers() {
-    this.panelActions = BREAKERS.map((b) => () => this.link.send({ t: 'use', k: `breaker:${b.id}` }));
-    const rows = BREAKERS.map((b, i) => `<div class="${this.breakers[b.id] ? 'on' : 'off'}"><b>${i + 1}</b>${esc(b.name)}<span>${this.breakers[b.id] ? 'ON' : 'OFF'}</span></div>`).join('');
-    this.refreshPanel(`<div class="sheet breakers"><h3>MAIN DISTRIBUTION · 480V</h3>${rows}<p class="note">Halvorsen's was disconnected in April. Tenant lights are off after closing.</p><div class="close">[1]-[6] THROW A BREAKER · [E] SHUT THE PANEL</div></div>`);
-  }
-
-  openKeypad() {
-    this.keypad = '';
-    this.openPanel('<div class="sheet keypad"></div>', '', 'keypad');
-    this.renderKeypad();
-  }
-
-  renderKeypad(msg = '') {
-    const shown = [0, 1, 2].map((i) => this.keypad[i] || '_').join(' ');
-    this.hud.panel(`<div class="sheet keypad"><h3>D. MERCER</h3><div class="dial">${shown}</div><div class="dead">${esc(msg)}</div><div class="close">TYPE THE COMBINATION · [ENTER] TRY IT · [E] STEP AWAY</div></div>`);
-  }
-
-  keypadKeys() {
-    const inp = this.input;
-    for (let i = 0; i < 10; i++) {
-      if ((inp.hit(`Digit${i}`) || inp.hit(`Numpad${i}`)) && this.keypad.length < 3) { this.keypad += String(i); sound.click(SPOTS.locker); this.renderKeypad(); }
-    }
-    if (inp.hit('Backspace')) { this.keypad = this.keypad.slice(0, -1); this.renderKeypad(); }
-    if (inp.hit('Enter') && this.keypad.length === 3) {
-      this.link.send({ t: 'code', v: this.keypad });
-      this.keypad = '';
-      setTimeout(() => { if (this.panelKind === 'keypad') { if (this.flags & 8) this.closePanel(); else this.renderKeypad(); } }, 400);
-    }
-    if (this.t - this.panelOpenedAt > 0.15 && (inp.hit('KeyE') || inp.hit('Escape') || inp.hit('KeyQ'))) this.closePanel();
-  }
-
-  openMap() {
-    this.openPanel('<div class="mapwrap"><canvas id="mapCanvas"></canvas><div class="legend"><span class="g">■</span> locked <span class="a">■</span> shut, not locked <span class="r">■</span> open · <span class="s">●</span> clock station · C camera · [M] put it away</div></div>', '', 'map');
-    this.drawMapNow();
-  }
-
-  drawMapNow() {
-    const c = document.getElementById('mapCanvas');
-    if (!c) return;
-    const players = this.roster.map((r) => {
-      const a = this.avatars.get(r.id);
-      if (r.id === this.me) return { x: this.p.x, z: this.p.z, ry: this.p.ry, color: r.color, me: true, out: a.taken };
-      return { x: a.x, z: a.z, ry: a.ry, color: r.color, me: false, out: a.taken || a.hidden };
-    });
-    drawMap(c, { doors: this.doors, punched: this.round.punched, round: this.round.n, players, dale: this.daleMode && this.daleMode !== 'trapped' ? { x: this.dale.x, z: this.dale.z } : null });
-  }
-
-  openNotes() {
-    this.openPanel('<div class="sheet notes"></div>', '', 'notes');
-    this.renderNotes();
-  }
-
-  renderNotes() {
-    const R = this.report;
-    let html;
-    if (R.open) {
-      const qs = REPORT.map((q, i) => {
-        const opts = q.a.map((a, j) => `<div class="${R.answers[i] === j ? 'picked' : ''}"><b>${j + 1}</b>${esc(a)}</div>`).join('');
-        return `<div class="q ${i === R.q ? 'cur' : ''}"><h4>${i + 1}. ${esc(q.q)}</h4>${opts}</div>`;
-      }).join('');
-      const ready = R.answers.every((a) => a != null);
-      html = `<div class="sheet notes report"><h3>GATEHOUSE SECURITY · INCIDENT REPORT · KINGSGATE MALL · 10/25/96</h3>${qs}<div class="close">[1]-[4] ANSWER · [TAB] NEXT QUESTION · ${ready ? '[ENTER] FILE THE REPORT' : 'ANSWER ALL THREE TO FILE IT'}</div></div>`;
+    const me = this.pos();
+    let target, dist, fov = 68, shoulder = 0;
+    if (this.myCar || this.ride) {
+      const c = me;
+      const id = this.myCar ? this.myCar.id : this.ride.id;
+      const T = CAR_TYPES[this.cars.get(id)?.type || 'sedan'];
+      // swing round behind the car unless you're looking about
+      const behind = c.h + Math.PI;
+      const spd = this.myCar ? Math.abs(this.myCar.c.v) : 8;
+      if (this.camLook > 1.2 && (spd > 2 || this.ride)) this.camYaw = lerpA(this.camYaw, behind, Math.min(1, dt * (1.5 + spd * 0.08)));
+      if (this.camLook > 1.2) this.camPitch += (0.22 - this.camPitch) * Math.min(1, dt * 2);
+      target = new THREE.Vector3(c.x, T.ht + 0.6, c.z);
+      dist = 5.2 + T.len * 0.55 + Math.min(14, spd) * 0.12;
+      fov = 70 + Math.min(10, spd * 0.25);
     } else {
-      const items = CLUE_ORDER.filter((k) => this.clues.has(k)).map((k) => `<p><b>${esc(CLUES[k].title)}</b>${esc(CLUES[k].text)}</p>`).join('');
-      html = `<div class="sheet notes"><h3>Notes · night of 10/24</h3>${items || '<p class="empty">Nothing yet. Dale\'s logbook is on the desk in the security office.</p>'}<div class="close">[J] CLOSE</div></div>`;
+      const p = this.p;
+      target = new THREE.Vector3(p.x, (p.ground || 0) + p.y + 1.55, p.z);
+      dist = this.aim ? 1.5 : 3.6;
+      shoulder = this.aim ? 0.55 : 0.25;
+      fov = this.aim ? 52 : 68;
+      if (!this.alive()) { dist = 6; this.camPitch += (0.7 - this.camPitch) * Math.min(1, dt); }
     }
-    this.lastPanelHtml = null;
-    this.refreshPanel(html);
-  }
-
-  reportKeys(k) {
-    const inp = this.input, R = this.report;
-    if (k >= 0 && k < REPORT[R.q].a.length) {
-      this.link.send({ t: 'report', q: R.q, a: k });
-      R.answers[R.q] = k;
-      R.q = Math.min(REPORT.length - 1, R.q + 1);
-      this.renderNotes();
-      return true;
+    const y = this.camYaw, pch = this.camPitch;
+    const bx = Math.sin(y), bz = Math.cos(y);           // behind the camera's facing
+    const rx = Math.cos(y), rz = -Math.sin(y);
+    target.x += rx * shoulder; target.z += rz * shoulder;
+    // don't put the camera inside a wall
+    const want = new THREE.Vector3(target.x + bx * dist * Math.cos(pch), target.y + dist * Math.sin(pch), target.z + bz * dist * Math.cos(pch));
+    const d = want.clone().sub(target);
+    const L = d.length();
+    d.divideScalar(L);
+    const hit = this.solids.ray(target.x, target.y, target.z, d.x, d.y, d.z, L);
+    const use = hit ? Math.max(0.6, hit.t - 0.3) : L;
+    this.camDist += (use - this.camDist) * Math.min(1, dt * (use < this.camDist ? 30 : 6));
+    cam.position.copy(target).addScaledVector(d, this.camDist);
+    cam.position.y = Math.max(cam.position.y, 0.4);
+    // shake
+    if (this.shake > 0) {
+      this.shake = Math.max(0, this.shake - dt * 2.5);
+      const s = this.shake * 0.12;
+      cam.position.x += (Math.random() - 0.5) * s; cam.position.y += (Math.random() - 0.5) * s; cam.position.z += (Math.random() - 0.5) * s;
     }
-    if (inp.hit('Tab')) { R.q = (R.q + 1) % REPORT.length; this.renderNotes(); return true; }
-    if (inp.hit('Enter') && R.answers.every((a) => a != null)) { this.link.send({ t: 'file' }); this.closePanel(); return true; }
-    return false;
+    cam.lookAt(target.x - bx * 2, target.y + 0.15 - (this.aim ? 0 : 0), target.z - bz * 2);
+    // the lookAt above points level-ish; tilt by the pitch so the crosshair is where you aim
+    cam.rotation.order = 'YXZ';
+    cam.rotation.set(-pch * 0.85 + 0.05, y, 0);
+    if (Math.abs(cam.fov - fov) > 0.1) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 8); cam.updateProjectionMatrix(); }
+    // headlights: your car's (and the car you're riding in)
+    const H = this.world.head;
+    if (this.myCar || this.ride) {
+      const c = me;
+      H.intensity = 15;
+      H.position.set(c.x + Math.sin(c.h) * 2, 0.9, c.z + Math.cos(c.h) * 2);
+      H.target.position.set(c.x + Math.sin(c.h) * 14, 0, c.z + Math.cos(c.h) * 14);
+    } else H.intensity = 0;
   }
 
-  // the tape in the VCR, Tuesday night, off camera 2 (the west concourse)
-  openVcr() {
-    const W = this.world;
-    const dale = makePerson({ ...(this.dale.root.userData.rig.look), top: 'uniform', topColor: 0x2c3a52, hat: 'police', hatColor: 0x1e2636 });
-    const it = makePerson('mqGuard');
-    W.scene.add(dale, it);
-    const hidden = this.hideDynamic();
-    const C = CAMERAS[1];
-    const shots = [
-      { stamp: 'TUE 10/22  02:47:12', who: dale, at: [-37.5, 1.2], ry: Math.PI / 2, pose: { pose: 'walk', speed: 1.2 } },
-      { stamp: 'TUE 10/22  02:47:31', who: dale, at: [-40.9, -0.5], ry: Math.PI / 2, pose: { pose: 'reach' } },
-      { stamp: 'TUE 10/22  03:31:05', who: it, at: [-39.0, 0.6], ry: -Math.PI / 2, pose: { pose: 'walk', speed: 1 } },
-      { stamp: 'TUE 10/22  03:31:09', who: it, at: [-33.5, -0.4], ry: -Math.PI / 2 - 0.5, pose: { pose: 'stand', lookYaw: 0.9, lookPitch: 0.15 } },
-    ];
-    const frames = shots.map((s) => this.cctv.still(this.renderer, {
-      pos: C.pos, look: C.look, fov: 58, w: 360, h: 240, stamp: s.stamp,
-      setup: () => {
-        dale.visible = s.who === dale; it.visible = s.who === it;
-        s.who.position.set(s.at[0], 0, s.at[1]);
-        s.who.rotation.y = s.ry + Math.PI;
-        for (let i = 0; i < 30; i++) s.who.userData.rig.update(0.05, { ...s.pose, stiff: s.who === it, noBlink: s.who === it });
-      },
-    }));
-    dale.removeFromParent();
-    it.removeFromParent();
-    for (const o of hidden) o.visible = true;
-    this.panelActions = [];
-    this.openPanel(`<div class="photos vcr">${frames.map((f) => `<figure class="tv"><img src="${f}"></figure>`).join('')}</div><div class="caption">TAPE: "TUE 10/22 · CAM 2". DALE GOES INTO HALVORSEN'S. SOMETHING IN HIS UNIFORM COMES OUT. [E]</div>`, '', 'vcr');
-  }
-
-  // Dale's roll of film from Photo Finish: four nights of Halvorsen's window
-  openPhotos() {
-    const W = this.world;
-    const hidden = this.hideDynamic();
-    const mq = this.mq.list.slice(0, 5);
-    const keep = mq.map((m) => ({ ry: m.root.rotation.y, x: m.root.position.x, z: m.root.position.z, y: m.root.position.y, pose: m.pose }));
-    const face = makePerson('mq1');
-    W.scene.add(face);
-    face.visible = false;
-    const pos = [-36.5, 1.5, -1.0], look = [-41, 1.3, -4.6];
-    const flash = W.hisLight;
-    const kf = { i: flash.intensity, p: flash.position.clone(), t: flash.target.position.clone(), a: flash.angle };
-    const shots = [
-      { stamp: "'96 10 15", arrange: () => {} },
-      { stamp: "'96 10 17", arrange: () => mq.forEach((m) => { m.root.rotation.y = Math.atan2(-(pos[0] - m.root.position.x), -(pos[2] - m.root.position.z)) + Math.PI; }) },
-      { stamp: "'96 10 19", arrange: () => { mq[0].root.position.x += 1.4; mq[0].root.position.y = 0; mq[1].root.visible = false; } },
-      { stamp: "'96 10 21", arrange: () => { face.visible = true; face.position.set(pos[0] - 0.7, 0, pos[2] - 0.5); face.rotation.y = Math.atan2(-(pos[0] - face.position.x), -(pos[2] - face.position.z)) + Math.PI; for (let i = 0; i < 30; i++) face.userData.rig.update(0.05, { pose: 'reach', stiff: true, noBlink: true, lookPitch: 0.25 }); } },
-    ];
-    const frames = shots.map((s) => this.cctv.still(this.renderer, {
-      pos, look, fov: 50, w: 300, h: 220, stamp: s.stamp, mono: false, flash: true,
-      setup: () => {
-        s.arrange();
-        flash.intensity = 120; flash.angle = 0.9;
-        flash.position.set(...pos);
-        flash.target.position.set(...look);
-      },
-      undo: () => {
-        mq.forEach((m, i) => { m.root.rotation.y = keep[i].ry; m.root.position.set(keep[i].x, keep[i].y, keep[i].z); m.root.visible = true; });
-        face.visible = false;
-      },
-    }));
-    flash.intensity = kf.i; flash.position.copy(kf.p); flash.target.position.copy(kf.t); flash.angle = kf.a;
-    face.removeFromParent();
-    for (const o of hidden) o.visible = true;
-    this.panelActions = [];
-    this.openPanel(`<div class="photos">${frames.map((f, i) => `<figure style="--r:${(i % 2 ? 2 : -2) + i * 0.5}deg"><img src="${f}"></figure>`).join('')}</div><div class="caption">DALE'S ROLL, FROM PHOTO FINISH: HALVORSEN'S WINDOW, FOUR NIGHTS. [E]</div>`, '', 'photos');
-  }
-
-  // everyone and everything that moves, out of the picture for a still
-  hideDynamic() {
-    const list = [...this.avatars.values()].map((a) => a.root).concat(this.stalker ? [this.stalker.root] : [], this.manager ? [this.manager.root] : [], [this.dale.root]);
-    const vis = list.filter((o) => o.visible);
-    for (const o of vis) o.visible = false;
-    return vis;
-  }
-
-  // ------------------------------------------------------- taken -------
-  startTaken(by) {
-    this.mode = 'taken';
-    this.cine = { t: 0 };
-    sound.jumpscare();
-    voice.stop();
-    this.closePanel();
-    this.hud.cctv(false);
-    const cam = this.camera;
-    if (this.hide) {
-      const v = hideView(this.hide);
-      cam.position.set(v.x, v.y, v.z);
+  updateHud(dt) {
+    const H = this.hud, M = this.me$;
+    H.money(M.money);
+    H.health(M.hp, M.armor);
+    const W = this.w;
+    const ammo = M.ammo[W], clip = M.clip[W];
+    H.weapon(W, ammo < 0 ? 0 : ammo, Math.min(clip, Math.max(0, ammo)), this.T < this.reloadUntil);
+    H.wanted(M.wanted, M.searching);
+    H.crosshair(!this.locked() && (this.aim || (this.ride && W !== 0)), false);
+    // the clock: 10 PM, a minute a second, round and round the night
+    const mins = (22 * 60 + Math.floor(this.T)) % (8 * 60);
+    const hh = (22 + Math.floor(mins / 60)) % 24, mm = mins % 60;
+    H.clock(`${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`);
+    // which part of town
+    this.areaT -= dt;
+    if (this.areaT <= 0) {
+      this.areaT = 0.6;
+      const me = this.pos();
+      const a = areaName(me.x, me.z);
+      if (a !== this.area) { this.area = a; if (this.intro < 0) H.area(a); }
     }
-    const fwd = cam.getWorldDirection(new THREE.Vector3());
-    fwd.y = 0;
-    fwd.normalize();
-    const s = (this.scareModel = by === 'stalker' ? this.scare.stalker : this.scare.mannequin);
-    s.position.set(cam.position.x + fwd.x * 0.45, cam.position.y - 1.7, cam.position.z + fwd.z * 0.45);
-    s.rotation.y = Math.atan2(-fwd.x, -fwd.z);
-    s.visible = true;
-    this.hud.prompt(null);
-    this.p.flash = false;
-  }
-
-  updateTaken(dt) {
-    const c = this.cine, t = (c.t += dt);
-    this.scareModel.userData.rig.update(dt, { pose: 'reach', speed: 0, lookYaw: 0, lookPitch: 0.25, stiff: true, noBlink: true });
-    this.camera.rotation.z = (Math.random() - 0.5) * 0.1 * (1 - span(t, 0.8, 1.5));
-    this.fx.glitch = t < 1.6 ? 1 : 0;
-    this.fx.staticAmt = t < 1.3 ? (Math.random() < 0.3 ? 0.5 : 0.08) : span(t, 1.3, 1.7);
-    this.fear = 1;
-    if (t > 1.7) { this.scareModel.visible = false; this.fadeTo = 1; }
-    if (t > 3.2) {
-      this.fx.staticAmt = 0;
-      this.fx.glitch = 0;
-      this.fadeTo = 0;
-      this.camera.rotation.z = 0;
-      this.hud.banner('YOU WERE TAKEN', 'Watching the others...');
-      setTimeout(() => this.hud.banner(null), 4000);
-      this.mode = 'spectate';
-      this.viewing = null;
-    }
-  }
-
-  updateSpectate() {
-    const list = [...this.avatars.values()].filter((a) => a.alive && !a.isMe);
-    if (!list.length) { this.viewing = null; this.hud.prompt(null); return; }
-    let i = list.indexOf(this.viewing);
-    if (i < 0) i = 0;
-    else if (this.input.clicks > 0 || this.input.hit('Space')) i = (i + 1) % list.length;
-    this.viewing = list[i];
-    this.hud.prompt(`Watching ${this.viewing.name}. Click to switch.`);
-  }
-
-  // a mannequin moved somewhere you couldn't see: you hear it
-  mannequinMoved(m) {
-    const last = this.creakT.get(m) || 0;
-    if (this.t - last < 0.7) return;
-    this.creakT.set(m, this.t);
-    const c = this.camera.position;
-    const d = Math.hypot(m.x - c.x, m.z - c.z);
-    if (d > 26) return;
-    sound.creak({ x: m.x, y: 1.0, z: m.z }, d < 6 ? 1.6 : 1);
-    if (d < 7) this.fear = Math.max(this.fear, 0.8 - d / 10);
-  }
-
-  // --------------------------------------------------- the world, sound --
-  updateWorld(dt) {
-    const W = this.world;
-    // everyone's flashlights: yours first (it casts the shadows)
-    const flashes = [];
-    for (const r of this.roster) {
-      const a = this.avatars.get(r.id);
-      if (r.id === this.me) {
-        const cam = this.camera;
-        const on = this.p.flash && (this.mode === 'play' || this.mode === 'panel');
-        flashes.unshift({ on, pos: cam.position.clone().add(new THREE.Vector3(0.14, -0.2, 0).applyEuler(cam.rotation)), dir: cam.getWorldDirection(new THREE.Vector3()) });
-      } else {
-        const on = a && a.flash && a.alive && !a.hidden && !a.cctv;
-        flashes.push({ on, pos: a.lightPos.clone(), dir: a.lightDir.clone() });
+    // a hint of what you can do here
+    let help = null;
+    if (!this.locked()) {
+      if (this.atShop()) help = 'Press ~y~E~w~ to buy guns and armour.';
+      else if (!this.myCar && !this.ride && this.nearestCar()) help = 'Press ~y~F~w~ to get in.';
+      else if (this.myCar && this.myCar.c.type === 'police') help = '~y~G~w~ siren · ~y~H~w~ horn · ~y~R~w~ radio';
+      else if (this.helpQueue.length && this.T > 2) {
+        this.helpT -= dt;
+        help = this.helpQueue[0];
+        if (this.helpT <= 0) { this.helpQueue.shift(); this.helpT = 6; }
       }
     }
-    const his = this.stalker && this.stalker.light.on ? this.stalker.light : null;
-    // the lights near it misbehave
-    this.flickerT -= dt;
-    if (this.flickerT <= 0) {
-      this.flickerT = 0.08;
-      const fl = new Map();
-      const s = this.stalker;
-      if (s) for (const f of FIXTURES) {
-        const d = Math.hypot(f.x - s.x, f.z - s.z);
-        if (d < 9 && !['moon', 'lot', 'desk'].includes(f.breaker)) fl.set(f, Math.random() < (s.flags & 2 ? 0.45 : 0.2) ? 0.05 : 0.7 + Math.random() * 0.3);
-      }
-      const dawn = this.clock > 29.95 ? clamp01((this.t - (this.dawnStart ?? (this.dawnStart = this.t))) / 8) : 0;
-      if (fl.size || this.flicker.size || dawn !== this.lastDawn) W.setBreakers(this.breakers, (this.flags & 2) !== 0, { force: true, flicker: fl, dawn });
-      this.lastDawn = dawn;
-      this.flicker = fl;
+    H.help(help);
+    // the race countdown
+    if (this.countAt != null) {
+      const left = this.countAt - this.T;
+      const n = left > 0 ? Math.ceil(left) : left > -1 ? 'GO!' : null;
+      if (n !== this.lastCount) { this.lastCount = n; H.countdown(n == null ? null : n > 3 ? null : n); if (n != null && n <= 3) sound.jingle(n === 'GO!' ? 'go' : 'count'); }
+      if (n == null) this.countAt = null;
     }
-    W.update(dt, this.t, { flashes, his, camera: this.camera });
-    // the monitors, if you're in the office and facing them
-    const c = this.camera.position;
-    const room = roomAt(c.x, c.z);
-    const facing = room && room.id === 'security' && this.camera.getWorldDirection(this.tmp).dot(this.tmp2.set(-c.x, 0, -26.6 - c.z).normalize()) > 0.2;
-    this.cctv.update(this.renderer, dt, this.mode !== 'cctv' && facing, this.breakers.cams);
-    const lit = lightAt(c.x, 1.5, c.z, { breakers: this.breakers, carousel: (this.flags & 2) !== 0 });
-    sound.setEnv({ lit, room: room ? (room.group === 1 ? 'big' : ['women', 'men', 'restHall'].includes(room.id) ? 'restroom' : 'back') : 'big', outdoor: room && (room.id === 'southVest' || room.id === 'eastVest') ? 1 : 0 });
-    sound.update(dt);
-  }
-
-  // its footsteps and keys, everyone else's footsteps
-  stepSounds(dt) {
-    const s = this.stalker;
-    if (s && s.moved > 0) {
-      s.stepAcc += s.moved;
-      if (s.stepAcc > 0.85) {
-        s.stepAcc = 0;
-        sound.heavyStep({ x: s.x, y: 0.1, z: s.z });
-        if (Math.random() < 0.5) sound.keys({ x: s.x, y: 1.0, z: s.z }, 3);
-      }
+    // the radar (and the map, if it's open)
+    const me = this.pos();
+    const blips = [];
+    for (const b of this.mission.blips || []) {
+      if (b.car != null) { const C = this.cars.get(b.car); if (C) blips.push({ x: C.view.x, z: C.view.z, k: b.k }); } else if (b.ped != null) { const P = this.peds.get(b.ped); if (P) blips.push({ x: P.view.x, z: P.view.z, k: b.k }); } else blips.push(b);
     }
-    for (const a of this.avatars.values()) {
-      if (a.isMe || !a.alive || a.hidden || a.cctv) continue;
-      a.stepAcc = (a.stepAcc || 0) + a.speed * dt;
-      if (a.stepAcc > 0.75) { a.stepAcc = 0; sound.step(this.surface(a.x, a.z), 0.55, { x: a.x, y: 0.1, z: a.z }); }
+    const players = [{ x: me.x, z: me.z, h: me.h ?? this.p.h, me: true, color: this.myColor }];
+    for (const O of this.others.values()) players.push({ x: O.view.x, z: O.view.z, h: O.view.h, color: O.color });
+    const police = [];
+    if (M.wanted > 0) {
+      for (const C of this.cars.values()) if (C.flags & 64 && C.flags & 1) police.push({ x: C.view.x, z: C.view.z });
+      for (const P of this.peds.values()) if (P.look === LOOK_COP && !P.dead) police.push({ x: P.view.x, z: P.view.z });
     }
-    const D = this.dale;
-    if (this.daleMode === 'follow' && D.moved > 0) {
-      D.stepAcc += D.moved;
-      if (D.stepAcc > 0.7) { D.stepAcc = 0; sound.step(this.surface(D.x, D.z), 0.5, { x: D.x, y: 0.1, z: D.z }); }
+    const spd = this.myCar ? Math.abs(this.myCar.c.v) : 0;
+    this.radar.draw({ x: me.x, z: me.z, yaw: this.camYaw, h: me.h ?? this.p.h, blips, players, police, range: 85 + spd * 2, t: this.T });
+    if (this.mapOpen) this.radar.drawMap({ x: me.x, z: me.z, h: me.h ?? this.p.h, blips, players });
+    if (this.shopOpen) {
+      if (!this.atShop()) this.openShop(false);
+      else this.hud.shop(true, M.money, M.ammo, M.armor, this.shopMsg || '');
     }
   }
 
-  // the drone, your heart
-  updateMood(dt) {
-    if (this.mode === 'intro') return;
-    const night = this.hourIdx >= 2 ? 1 : 0.4;
-    let tension = 0.04 + night * 0.08 + (this.hourIdx >= 7 && this.hourIdx < 8 ? 0.25 : 0);
-    const cam = this.camera.position;
-    let near = 99;
-    for (const m of this.mq.list) if (m.active) near = Math.min(near, Math.hypot(m.x - cam.x, m.z - cam.z));
-    tension = Math.max(tension, clamp01((14 - near) / 14) * 0.7);
-    const s = this.stalker;
-    if (s) {
-      const d = Math.hypot(s.x - cam.x, s.z - cam.z);
-      tension = Math.max(tension, clamp01((30 - d) / 30) * 0.6);
-      if (s.flags & 2) tension = 1;
-      if (d < 10 || (s.flags & 2 && d < 25)) this.fear = Math.max(this.fear, clamp01((10 - d) / 10));
+  updateSound() {
+    sound.setListener(this.camera);
+    const me = this.pos();
+    // engines: mine, and the nearest few
+    const near = [];
+    for (const [id, C] of this.cars) {
+      if (C.flags & 8) continue;
+      const d = Math.hypot(C.view.x - me.x, C.view.z - me.z);
+      if (d < 45) near.push([d, id, C]);
+      if (C.flags & 1 && d < 150) sound.siren(id, { x: C.view.x, z: C.view.z });
     }
-    if (this.fear > 0.4 && this.mode !== 'spectate' && this.mode !== 'taken') {
-      this.heartT -= dt;
-      if (this.heartT <= 0) { this.heartT = 0.45 + (1 - this.fear) * 0.5; sound.heartbeat(1 + this.fear, 0.3 + this.fear * 0.5); }
+    near.sort((a, b) => a[0] - b[0]);
+    if (this.myCar) {
+      const c = this.myCar.c, T = CAR_TYPES[c.type];
+      const rpm = Math.min(1, Math.abs(c.v) / T.top * 1.4 + 0.08) % 1.0001;
+      sound.engine('me', null, rpm, Math.abs(this.throttle || 0), true);
+      sound.screech(Math.max(0, Math.abs(c.s) - 2) / 6 + (this.handbrake && Math.abs(c.v) > 6 ? 0.6 : 0));
+    } else sound.screech(0);
+    let n = 0;
+    for (const [, id, C] of near) {
+      if (this.myCar && id === this.myCar.id) continue;
+      if (n++ >= 3) break;
+      const T = CAR_TYPES[C.type];
+      if (!(C.flags & 32) && !this.others.size && Math.abs(C.v || 0) < 0.3) continue;
+      sound.engine(id, { x: C.view.x, z: C.view.z }, Math.min(1, Math.abs(C.v || 0) / T.top * 1.4 + 0.08), 0.3);
     }
-    if (Math.abs(tension - sound.tension) > 0.04) sound.setTension(tension, 2.5);
-    this.fear = Math.max(0, this.fear - dt * 0.25);
+    sound.sweepEngines();
+    sound.setRadio(!!(this.myCar || this.ride) && this.radioOn && this.intro < 0);
+    sound.update(1 / 60);
   }
 
-  updateFx(dt) {
-    const fx = this.fx;
-    if (this.mode !== 'intro') fx.bars = 0;
-    fx.fear = this.fear * 0.8;
-    fx.cctv = this.mode === 'cctv';
-    fx.exposure = this.mode === 'cctv' ? 1.45 : 1.0;
-    fx.saturation = 1;
-    if (this.mode === 'cctv' && !this.breakers.cams) fx.staticAmt = 0.92;
-    else if (this.mode !== 'taken' && this.mode !== 'intro') { fx.staticAmt = lerp(fx.staticAmt, 0, 1 - Math.exp(-dt * 6)); fx.glitch = lerp(fx.glitch, 0, 1 - Math.exp(-dt * 6)); }
-    if (this.mode !== 'taken' && this.mode !== 'intro') this.fadeTo = 0;
-    fx.fade = lerp(fx.fade, this.fadeTo, 1 - Math.exp(-dt * 2));
+  // ------------------------------------------------------------ panels
+  toggleMap() {
+    this.mapOpen = !this.mapOpen;
+    $('mapScreen').hidden = !this.mapOpen;
   }
 
-  updateHud() {
-    const hud = this.hud, p = this.p;
-    if (this.mode === 'intro') return;
-    const H = HOURS[Math.max(0, this.hourIdx)];
-    hud.clock(this.clock, this.hourIdx >= 0 ? H.sub : '');
-    const playing = this.mode === 'play';
-    hud.stamina(playing && p.stamina < STAMINA_MAX - 0.05 ? p.stamina / STAMINA_MAX : null);
-    hud.flashlight(p.flash);
-    hud.crosshair(playing);
-    if (this.mode === 'cctv') {
-      const C = CAMERAS[this.camIdx];
-      hud.camOverlay(C.name, C.n, this.clock, this.breakers.cams);
-      hud.prompt(null);
-    } else if (this.mode === 'hidden') hud.prompt('Hiding. Keep still.', '[E] Get out');
-    else if (playing && this.target) {
-      if (this.target.kind === 'door') {
-        const pr = this.doorPrompt(this.target.d, this.target.k);
-        hud.prompt(pr.text || pr.e || pr.r, pr.text ? [pr.e, pr.r].filter(Boolean).join('   ') : pr.e && pr.r ? pr.r : null);
-      } else {
-        const dv = this.doorInView, pr = dv ? this.doorPrompt(dv.d, dv.k) : null;
-        hud.prompt(this.target.label, pr && pr.r ? pr.r : null);
-      }
-    } else if (this.mode !== 'spectate') hud.prompt(null);
-    hud.hint(playing ? '[F] flashlight   [V] walkie   [M] map   [J] notes   [1-4] shout   [C] crouch' : '');
-    if (Math.floor(this.t * 2) !== this.teamT) { this.teamT = Math.floor(this.t * 2); this.updateTeam(); }
+  openShop(open) {
+    this.shopOpen = open;
+    this.shopMsg = '';
+    this.hud.shop(open, this.me$.money, this.me$.ammo, this.me$.armor);
+    if (open) this.input.unlock(); else this.input.lock();
+  }
+
+  onShopKey(e) {
+    if (!this.shopOpen) return;
+    const k = { Digit1: 'pistol', Digit2: 'smg', Digit3: 'shotgun', Digit4: 'armor' }[e.code];
+    if (k) this.link.send({ t: 'buy', item: k });
+    if (e.code === 'KeyE' || e.code === 'Escape') { e.preventDefault(); this.openShop(false); }
   }
 
   render() {
-    const fx = this.fx;
-    fx.time = this.t;
-    // the flashlight's shadows only need redrawing while it's on
-    this.renderer.shadowMap.needsUpdate = this.world.flashlights[0].intensity > 0;
-    if (this.mode === 'cctv') {
-      const cam = this.cctv.cams[this.camIdx];
-      cam.aspect = this.camera.aspect;
-      cam.updateProjectionMatrix();
-      this.cctv.gain(true);
-      this.post.render((target) => this.world.render(this.renderer, cam, target), fx);
-      this.cctv.gain(false);
-      return;
-    }
-    this.post.render((target) => this.world.render(this.renderer, this.camera, target), fx);
+    this.post.render((target) => this.world.render(this.renderer, this.camera, target), this.fxState());
+  }
+
+  fxState() {
+    const f = this.fx$ || (this.fx$ = { fade: 0, bars: 0, exposure: 1, fear: 0, saturation: 1 });
+    f.time = this.T;
+    const down = !this.alive();
+    f.saturation += ((down ? 0.15 : 1) - f.saturation) * 0.05;
+    f.bars += ((this.mission.cut || this.intro >= 0 ? 1 : 0) - f.bars) * 0.08;
+    f.fade = this.intro >= 0 ? Math.max(0, 1 - this.intro * 0.8) : 0;
+    f.fear = Math.min(0.6, (this.me$.wanted || 0) * 0.04);
+    return f;
   }
 
   resize(w, h) {
@@ -1124,30 +1000,24 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  // the end
-  over() {
-    this.mode = 'over';
-    this.hud.cctv(false);
-    sound.setTension(0, 3);
-  }
-
   dispose() {
-    for (const f of this.off) f();
-    sound.quiet();
+    for (const off of this.off) off();
+    removeEventListener('keydown', this.shopKeys);
+    $('shop').removeEventListener('click', this.shopClick);
+    for (const C of this.cars.values()) C.view.dispose();
+    for (const P of this.peds.values()) P.view.dispose();
+    for (const O of this.others.values()) O.view.dispose();
+    for (const m of [...this.pickups.values(), ...this.objects.values(), ...this.markers.values(), ...this.arrows]) m.removeFromParent();
+    for (const g of [...this.givers.values(), ...this.drivers.values()]) g.dispose();
+    this.myView.dispose();
+    this.fx.dispose();
+    this.world.head.intensity = 0;
+    for (const t of this.sayTimers || []) clearTimeout(t);
     voice.stop();
-    this.cutscene.finish();
-    for (const a of this.avatars.values()) a.dispose();
-    if (this.stalker) this.stalker.dispose();
-    if (this.manager) this.manager.dispose();
-    this.dale.dispose();
-    this.mq.dispose();
-    this.cctv.dispose();
-    for (const s of Object.values(this.scare)) s.removeFromParent();
-    this.world.setBreakers({ concourse: true, court: true, food: true, stores: false, back: true, cams: true }, false, { force: true });
-    this.world.setFlags(0);
-    MALL_UNIFORMS.mallScale.value = 1;
+    sound.quiet();
   }
 }
 
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-void clockText;
+const r2 = (v) => Math.round(v * 100) / 100;
+const r3 = (v) => Math.round(v * 1000) / 1000;
+export { PRICES };

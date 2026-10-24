@@ -4,7 +4,6 @@
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import * as TX from './textures.js';
 
 const mats = new Map();
 export function mat(color, o = {}) {
@@ -77,8 +76,8 @@ export function lathe(key, pts, segs = 20) {
   return cachedGeo(key, () => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), segs));
 }
 
-export const wood = (tone, key, rough = 0.6) => mat(0xffffff, { map: TX.wood(tone, key), rough });
-export const cloth = (color) => mat(color, { map: TX.fabric(), rough: 0.95 });
+export const wood = (tone, key, rough = 0.6) => mat(tone, { rough });
+export const cloth = (color) => mat(color, { rough: 0.95 });
 export const METAL = () => mat(0x9a9a98, { rough: 0.35, metal: 0.85 });
 export const STEEL = () => mat(0x80837f, { rough: 0.6, metal: 0.55 });
 export const BLACK = () => mat(0x161616, { rough: 0.5, metal: 0.3 });

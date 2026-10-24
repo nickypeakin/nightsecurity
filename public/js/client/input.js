@@ -1,4 +1,4 @@
-// Keyboard and mouse for the first-person controls.
+// Keyboard and mouse.
 
 export class Input {
   constructor(canvas) {
@@ -9,6 +9,7 @@ export class Input {
     this.my = 0;
     this.clicks = 0;
     this.rightClicks = 0;
+    this.wheel = 0;            // notches turned since the last frame
     this.buttons = new Set();  // mouse buttons held
     this.fakeLock = new URLSearchParams(location.search).has('autotest');
     const on = (t, ev, fn, opts) => { t.addEventListener(ev, fn, opts); this.off.push(() => t.removeEventListener(ev, fn, opts)); };
@@ -17,7 +18,7 @@ export class Input {
       if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
       if (!this.keys.has(e.code)) this.hits.add(e.code);
       this.keys.add(e.code);
-      if (this.locked && ['Space', 'Tab', 'KeyF', 'KeyQ', 'KeyE', 'KeyR', 'KeyC', 'KeyV', 'KeyM', 'KeyJ', 'Backspace', 'ControlLeft'].includes(e.code)) e.preventDefault();
+      if (this.locked && ['Space', 'Tab', 'KeyF', 'KeyQ', 'KeyE', 'KeyR', 'KeyC', 'KeyV', 'KeyM', 'KeyH', 'KeyG', 'AltLeft', 'Backspace', 'ControlLeft'].includes(e.code)) e.preventDefault();
     });
     on(window, 'keyup', (e) => this.keys.delete(e.code));
     on(window, 'blur', () => { this.keys.clear(); this.buttons.clear(); });
@@ -34,6 +35,7 @@ export class Input {
     });
     on(document, 'mouseup', (e) => this.buttons.delete(e.button));
     on(document, 'contextmenu', (e) => { if (this.locked) e.preventDefault(); });
+    on(window, 'wheel', (e) => { if (this.locked) this.wheel += Math.sign(e.deltaY); }, { passive: true });
   }
 
   // `?autotest` in the URL lets automated tests play without pointer lock
@@ -58,6 +60,7 @@ export class Input {
     this.mx = this.my = 0;
     this.clicks = 0;
     this.rightClicks = 0;
+    this.wheel = 0;
   }
 
   dispose() {

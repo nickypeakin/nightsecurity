@@ -1,7 +1,7 @@
 {
-  "name": "night-security",
+  "name": "kingsgate-nights",
   "version": "1.0.0",
-  "description": "A co-op 3D horror game in the browser. You and your friends work the night shift at Kingsgate Mall: lock every gate, punch every clock, watch the cameras, and find out what happened to the last guard. The mannequins only move when nobody is looking.",
+  "description": "An open-world, GTA-style crime game in the browser, for up to four friends: steal cars, outrun the police, and take jobs around the city of Kingsgate at night.",
   "type": "module",
   "private": true,
   "scripts": {
@@ -14,6 +14,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource/bebas-neue": "5.3.0",
     "@fontsource/inter": "5.1.0",
     "@fontsource/special-elite": "5.1.0",
     "@fontsource/vt323": "5.3.0",

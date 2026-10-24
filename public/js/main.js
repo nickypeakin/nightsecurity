@@ -1,21 +1,18 @@
-// Start-up and menu flow: title screen, alone / host / join, lobby, the
-// night itself, pause and results.
+// Start-up and menu flow: title screen, continue / new game / host / join,
+// the lobby, the city itself, pause, saving.
 
 import * as THREE from 'three';
-import './client/lighting.js';
+import { CITY_UNIFORMS } from './client/lighting.js';
 import { Post } from './client/post.js';
 import { Input } from './client/input.js';
-import { Hud, showScreen, screenShown, renderLobby, renderResults, setMsg } from './client/ui.js';
+import { Hud, showScreen, screenShown, renderLobby, setMsg } from './client/ui.js';
 import { HostLink, GuestLink, testConnection } from './client/net.js';
-import { Mall } from './client/mallScene.js';
+import { City } from './client/cityScene.js';
 import { Game } from './client/game.js';
-import { makePerson, bakePose, LOOKS, MANNEQUIN_LOOKS } from './client/humans.js';
 import { Attract } from './client/attract.js';
-import { MALL_UNIFORMS } from './client/lighting.js';
 import { sound } from './client/audio.js';
 import { voice } from './client/voice.js';
-import * as MALL from './shared/mall.js';
-import { MANNEQUIN_HOMES, UNIFORM_HOME } from './shared/mall.js';
+import { MISSIONS } from './shared/story.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('gl');
@@ -27,44 +24,28 @@ try {
   setMsg('titleMsg', 'Your browser could not start WebGL, which this game needs. Try Chrome, Edge or Firefox on a computer.');
   throw new Error('WebGL unavailable');
 }
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFShadowMap;
-// the only shadow is your flashlight's: redrawn only while it's on (the game
-// asks for it each frame)
-renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.enabled = false;
 renderer.toneMapping = THREE.NoToneMapping;
 const post = new Post(renderer);
 const input = new Input(canvas);
 const hud = new Hud();
-// building the mall takes a moment: say so before the page goes quiet
+// building the city takes a moment: say so before the page goes quiet
 showScreen('loading');
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
-const world = new Mall(renderer);
+const world = new City();
 const attract = new Attract(world);
-
-// the window displays, for the title screen (each night brings its own)
-const display = new THREE.Group();
-const dummy = (look, x, z, ry, pose) => {
-  const m = makePerson(look);
-  for (let k = 0; k < 30; k++) m.userData.rig.update(0.05, { pose, stiff: true, noBlink: true });
-  const g = bakePose(m);
-  g.scale.copy(m.scale);
-  g.position.set(x, x < -40.2 ? 0.24 : 0, z);
-  g.rotation.y = ry + Math.PI;
-  display.add(g);
-};
-MANNEQUIN_HOMES.forEach(([x, z, ry], i) => dummy(MANNEQUIN_LOOKS[i % MANNEQUIN_LOOKS.length], x, z, ry, ['stand', 'pockets', 'hold'][i % 3]));
-dummy('mqGuard', UNIFORM_HOME[0], UNIFORM_HOME[1], UNIFORM_HOME[2], 'stand');
-world.scene.add(display);
 
 // ------------------------------------------------------------- settings --
 const params = new URLSearchParams(location.search);
-// ?hour=3 starts the night at that hour (for testing): 0 is 10 PM, 8 is 6 AM
-const startAt = Math.max(0, Math.min(8, Number(params.get('hour')) || 0));
-const SETTINGS_KEY = 'kingsgate-night';
-const settings = { name: '', sens: 1, vol: 0.8, invert: false, voices: true, vhs: false, graphics: 'auto', bright: 1 };
+// ?skip skips the opening (used by tests)
+const startAt = params.has('skip') ? 'skip' : 0;
+const SETTINGS_KEY = 'kingsgate-city';
+const SAVE_KEY = 'kingsgate-city-save';
+const settings = { name: '', sens: 1, vol: 0.8, invert: false, voices: true, vhs: false, graphics: 'auto', bright: 1, radio: 0.6 };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}); } catch { /* private mode */ }
 const save = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ } };
+const loadGame = () => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch { return null; } };
+const storeGame = (data) => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch { /* private mode */ } };
 sound.volume = settings.vol;
 voice.volume = settings.vol;
 voice.enabled = settings.voices && !params.has('autotest');
@@ -80,18 +61,27 @@ $('voices').checked = settings.voices;
 $('vhs').checked = settings.vhs;
 $('sens').addEventListener('input', (e) => { settings.sens = +e.target.value; save(); });
 $('vol').addEventListener('input', (e) => { settings.vol = +e.target.value; sound.setVolume(settings.vol); voice.volume = settings.vol; save(); });
-$('bright').addEventListener('input', (e) => { settings.bright = +e.target.value; MALL_UNIFORMS.mallScale.value = settings.bright; save(); });
+$('bright').addEventListener('input', (e) => { settings.bright = +e.target.value; CITY_UNIFORMS.cityScale.value = settings.bright; save(); });
 $('invert').addEventListener('change', (e) => { settings.invert = e.target.checked; save(); });
 $('voices').addEventListener('change', (e) => { settings.voices = e.target.checked; voice.enabled = settings.voices; if (!settings.voices) voice.stop(); save(); });
 $('vhs').addEventListener('change', (e) => { settings.vhs = e.target.checked; post.grainOn = settings.vhs; save(); });
 $('graphics').value = settings.graphics;
 $('graphics').addEventListener('change', (e) => { settings.graphics = e.target.value; save(); applyGraphics(); });
-MALL_UNIFORMS.mallScale.value = settings.bright;
+CITY_UNIFORMS.cityScale.value = settings.bright;
 
 const invited = (params.get('join') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
 if (invited) $('code').value = invited;
 document.fonts?.load('40px "Special Elite"').catch(() => {});
 document.fonts?.load('20px VT323').catch(() => {});
+
+// the continue button, if there's a game to continue
+function showContinue() {
+  const g = loadGame();
+  const b = $('continueBtn');
+  b.hidden = !g;
+  if (g) b.querySelector('small').textContent = `${Math.min(g.done || 0, MISSIONS.length)} of ${MISSIONS.length} jobs done · $${g.money || 0}`;
+}
+showContinue();
 
 // ---------------------------------------------------------------- state --
 let link = null;
@@ -101,23 +91,23 @@ let backTo = 'title';
 let paused = false;
 
 // Graphics: 'auto' starts at the screen's own resolution and steps down a
-// ladder while frames take too long (a little resolution, a smaller shadow
-// map, no glow or anti-aliasing, less resolution again), climbing back when
-// there's headroom. 'high' keeps everything, including the extra pixels of
-// high-density screens; 'low' starts at the bottom (and has no shadows).
+// ladder while frames take too long (a little resolution, no glow or
+// anti-aliasing, less resolution again), climbing back when there's
+// headroom. 'high' keeps everything, including the extra pixels of
+// high-density screens; 'low' starts at the bottom.
 // `?scale=0.5` fixes the resolution (used by tests).
 const LADDER = [
-  { scale: 1, samples: 2, bloom: true, shadow: 1024 },
-  { scale: 0.85, samples: 2, bloom: true, shadow: 1024 },
-  { scale: 0.75, samples: 2, bloom: true, shadow: 512 },
-  { scale: 0.75, samples: 0, bloom: false, shadow: 512 },
-  { scale: 0.62, samples: 0, bloom: false, shadow: 512 },
-  { scale: 0.5, samples: 0, bloom: false, shadow: 512 },
+  { scale: 1, samples: 2, bloom: true },
+  { scale: 0.85, samples: 2, bloom: true },
+  { scale: 0.75, samples: 0, bloom: true },
+  { scale: 0.7, samples: 0, bloom: false },
+  { scale: 0.6, samples: 0, bloom: false },
+  { scale: 0.5, samples: 0, bloom: false },
 ];
 const PRESETS = {
-  auto: { maxDpr: 1, top: 0, bottom: LADDER.length - 1, shadows: true },
-  high: { maxDpr: 2, top: 0, bottom: 0, shadows: true, fixed: { samples: 4 } },
-  low: { maxDpr: 1, top: LADDER.length - 2, bottom: LADDER.length - 1, shadows: false },
+  auto: { maxDpr: 1, top: 0, bottom: LADDER.length - 1 },
+  high: { maxDpr: 2, top: 0, bottom: 0, fixed: { samples: 4 } },
+  low: { maxDpr: 1, top: LADDER.length - 2, bottom: LADDER.length - 1 },
 };
 const fixedScale = Number(params.get('scale')) || 0;
 let preset = PRESETS[settings.graphics] || PRESETS.auto;
@@ -129,20 +119,12 @@ function setLevel(i) {
   level = i;
   const L = { ...LADDER[i], ...(preset.fixed || {}) };
   post.configure({ maxDpr: preset.maxDpr, samples: L.samples, bloom: L.bloom });
-  world.shadowSize(L.shadow);
   quality = fixedScale || L.scale;
   post.setSize(innerWidth, innerHeight, quality);
 }
 
 function applyGraphics() {
   preset = PRESETS[settings.graphics] || PRESETS.auto;
-  if (renderer.shadowMap.enabled !== preset.shadows) {
-    renderer.shadowMap.enabled = preset.shadows;
-    // every material has to be rebuilt with (or without) shadows
-    world.scene.traverse((o) => {
-      if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
-    });
-  }
   frameAvg = 1 / 60;
   calmT = 0;
   upWait = 6;
@@ -184,29 +166,14 @@ function resize() {
   if (game) game.resize(w, h);
 }
 addEventListener('resize', resize);
-renderer.shadowMap.enabled = preset.shadows;
 setLevel(preset.top);
 resize();
-
-// Compile every shader the game will need now, while the title is up, so
-// nobody's first sight of a mannequin (or the manager) stalls the game.
-function prewarm(scene, camera) {
-  const people = new THREE.Group();
-  Object.keys(LOOKS).forEach((k, i) => {
-    const p = makePerson(k);
-    p.position.set(i * 0.8, -60, 0);
-    people.add(p);
-  });
-  scene.add(people);
-  renderer.compile(scene, camera);
-  scene.remove(people);
-}
-prewarm(world.scene, attract.camera);
+renderer.compile(world.scene, attract.camera);
 // handles for automated browser tests
-if (params.has('autotest')) window.__three = { renderer, world, post, THREE, MALL };
+if (params.has('autotest')) window.__three = { renderer, world, post, THREE };
 
 function playerName() {
-  const n = $('name').value.trim() || 'Guard';
+  const n = $('name').value.trim() || 'Player';
   settings.name = n;
   save();
   return n;
@@ -236,13 +203,22 @@ function wire(l) {
   });
   l.on('status', (m) => { if (l === link && !game) setMsg(l.isHost ? 'lobbyMsg' : guestMsgId(), m.text); });
   l.on('start', (m) => { if (l === link) startGame(m); });
-  l.on('over', (m) => { if (l === link) endGame(m); });
+  l.on('save', (m) => { if (l === link && l.isHost) storeGame(m.data); });
   l.on('closed', (m) => { if (l === link) { leave(); setMsg('titleMsg', m.text); } });
   l.on('neterror', (m) => { if (l === link) setMsg('lobbyMsg', m.text); });
 }
 
 const actions = {
+  // carry on from the save on this computer
+  continue() {
+    begin();
+    solo = true;
+    link = new HostLink(playerName(), { startAt: 'skip', save: loadGame() });
+    wire(link);
+    link.send({ t: 'start' });
+  },
   solo() {
+    if (loadGame() && !confirm('Start a new game? Your saved progress on this computer will be replaced when you next save.')) return;
     begin();
     solo = true;
     link = new HostLink(playerName(), { startAt });
@@ -252,7 +228,7 @@ const actions = {
   host() {
     begin();
     solo = false;
-    link = new HostLink(playerName(), { online: true, startAt });
+    link = new HostLink(playerName(), { online: true, startAt: 'skip', save: loadGame() });
     wire(link);
     showScreen('lobby');
   },
@@ -303,11 +279,9 @@ const actions = {
     else if (document.execCommand('copy')) done();
   },
   share() {
-    navigator.share?.({ title: 'Night Security', text: 'Work the night shift at Kingsgate Mall with me.', url: $('inviteLink').value }).catch(() => {});
+    navigator.share?.({ title: 'Kingsgate Nights', text: 'Come and cause trouble in Kingsgate with me.', url: $('inviteLink').value }).catch(() => {});
   },
   start() { link?.send({ t: 'start' }); },
-  again() { link?.send({ t: 'start' }); },
-  tolobby() { link?.send({ t: 'tolobby' }); },
   leave: () => leave(),
   menu: () => leave(),
   quit: () => leave(),
@@ -316,6 +290,7 @@ const actions = {
     input.lock();
     setPaused(false);
   },
+  map() { if (game) game.toggleMap(); },
 };
 
 function guestMsgId() {
@@ -335,7 +310,7 @@ function showInvite(m) {
 }
 
 function currentScreen() {
-  for (const id of ['title', 'lobby', 'pause', 'results']) if (screenShown(id)) return id;
+  for (const id of ['title', 'lobby', 'pause']) if (screenShown(id)) return id;
   return 'title';
 }
 
@@ -345,11 +320,10 @@ document.addEventListener('click', (e) => {
 });
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') actions.join(); });
 
-// ---------------------------------------------------------------- night --
+// ---------------------------------------------------------------- game --
 function startGame(m) {
   if (game) disposeGame();
   hud.reset();
-  display.visible = false;
   game = new Game({ renderer, post, world, link, start: m, hud, input, settings });
   game.resize(innerWidth, innerHeight);
   setPaused(false);
@@ -359,29 +333,12 @@ function startGame(m) {
   window.__game = game; // handle for automated browser tests
 }
 
-function endGame(over) {
-  const amHost = !!link?.isHost;
-  const show = () => {
-    if (!game) return;
-    disposeGame();
-    input.unlock();
-    renderResults(over, link?.id, amHost);
-    $('toLobbyBtn').hidden = !amHost || solo;
-    showScreen('results');
-    sound.setScene('title', 2);
-  };
-  if (game) game.over();
-  setTimeout(show, over.ending === 'taken' ? 2500 : 1200);
-}
-
 function disposeGame() {
   game.dispose();
   game = null;
   window.__game = null;
-  display.visible = true;
   hud.hide();
   hud.reset();
-  MALL_UNIFORMS.mallScale.value = settings.bright;
 }
 
 function leave() {
@@ -393,11 +350,12 @@ function leave() {
   setPaused(false);
   input.unlock();
   showScreen('title');
+  showContinue();
   sound.quiet();
   if (sound.ready) sound.setScene('title', 2);
 }
 
-// solo games really pause; with friends the night goes on
+// solo games really pause; with friends the city goes on
 function setPaused(on) {
   paused = on && solo;
   if (link && link.lobby) link.lobby.paused = paused;
@@ -408,13 +366,13 @@ document.addEventListener('pointerlockchange', () => {
   if (input.locked) {
     showScreen(null);
     setPaused(false);
-  } else {
+  } else if (!game.mapOpen && !game.shopOpen) {
     showScreen('pause');
-    setMsg('pauseNote', solo ? '' : "Heads up: the night keeps going for everyone else while you're paused.");
+    setMsg('pauseNote', solo ? 'Your progress saves when you pass a job, find a tape, or walk into your place.' : "Heads up: the city keeps going for everyone else while you're paused.");
     setPaused(true);
   }
 });
-canvas.addEventListener('click', () => { if (game && !input.locked) actions.resume(); });
+canvas.addEventListener('click', () => { if (game && !input.locked && !game.mapOpen && !game.shopOpen) actions.resume(); });
 
 // ----------------------------------------------------------------- loop --
 let last = performance.now();
@@ -439,7 +397,7 @@ requestAnimationFrame(frame);
 
 if (invited) {
   const from = (params.get('from') || '').slice(0, 16);
-  $('inviteWho').textContent = `${from ? `${from}'s` : "A friend's"} shift · lobby ${invited}`;
+  $('inviteWho').textContent = `${from ? `${from}'s` : "A friend's"} game · lobby ${invited}`;
   $('inviteName').value = $('name').value;
   $('inviteName').addEventListener('keydown', (e) => { if (e.key === 'Enter') actions.inviteJoin(); });
   showScreen('invite');

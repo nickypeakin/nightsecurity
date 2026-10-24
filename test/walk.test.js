@@ -1,120 +1,263 @@
-// Walks a guard around the mall with the same rules the game uses (the
-// walls, the furniture, the doors, the guard's size) and checks the things
-// that matter: you can get from the centre court to every room, every
-// clock station and everything you can use; a locked gate keeps you out
-// (and its key-holder in); and nothing you need is stuck inside a wall.
+// Checks the city itself, without running it: every lane, junction and
+// parking space has room for a car; the pavements, crossings and every
+// named place have room for a person; everywhere that matters (the jobs,
+// the tapes, the pickups) can be walked to from your place; the traffic
+// lights never show green both ways; and the car physics drives, brakes,
+// steers, slides and crashes the way it should.
 //
 // usage: node test/walk.test.js
 
-import { PLAYER_R, WALK, REACH } from '../public/js/shared/config.js';
-import { Solids, NavGrid, staticSolids, doorBox, DOORS, DOOR_INDEX, ROOMS, STATIONS, SPOTS, HIDES, START_SPOTS, DALE_SPOTS, roomAt } from '../public/js/shared/mall.js';
-import { follow, stepTo } from '../public/js/host/nav.js';
+import { NODES, EDGES, lane, light, hasLights, CYCLE, PARKING, WALK_NODES, PLACES, BUILDINGS, LAMPS, BOUND, onRoad, areaName, makeSolids, openAt } from '../public/js/shared/city.js';
+import { makeCar, stepCar, CAR_TYPES } from '../public/js/shared/car.js';
+import { carVsBox, carVsCar } from '../public/js/shared/collide.js';
+import { MISSIONS, TAPES } from '../public/js/shared/story.js';
+import { PLAYER_R } from '../public/js/shared/config.js';
 
 let failures = 0;
-const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } else console.log('  ok:', what); };
-
-const solids = new Solids(staticSolids());
-const nav = new NavGrid(solids, { radius: PLAYER_R + 0.04 });
-const DT = 1 / 30;
-
-// shut: the ids of doors that are shut (everything else is open)
-function setDoors(shut) {
-  solids.dynamic = DOORS.filter((d) => shut.has(d.id) || d.kind === 'glass' || d.kind === 'rollup').map((d) => doorBox(d));
-}
-
-// walk from p towards (gx, gz) the way the game's own walkers steer (down
-// the grid's distance field, cutting corners only where it's clear), with
-// a guard's size and the guard's collision; returns how close you got
-function walk(p, gx, gz, pass, maxT = 120) {
-  const D = Float32Array.from(nav.field(gx, gz, pass));
-  const a = { x: p.x, z: p.z, ry: 0 };
-  let t = 0, best = Infinity;
-  while (t < maxT) {
-    const d = Math.hypot(gx - a.x, gz - a.z);
-    best = Math.min(best, d);
-    if (d < 0.35) break;
-    const r = follow(nav, solids, a, D, WALK, DT, PLAYER_R, pass, (k) => !pass(k));
-    if (r.stuck || r.door >= 0) break;
-    if (r.left < 0.3) { stepTo(solids, a, gx, gz, WALK, DT, PLAYER_R); }
-    t += DT;
-  }
-  p.x = a.x; p.z = a.z;
-  return best;
-}
-
-const allOpen = () => true;
-const passShut = (shut) => (k) => !shut.has(DOORS[k].id) && DOORS[k].kind !== 'glass' && DOORS[k].kind !== 'rollup';
-
-// ---- every room from the centre court, everything open
-setDoors(new Set());
-console.log('every room, from the fountain');
-// (behind the food court counters is nobody's business)
-for (const r of ROOMS.filter((q) => !q.id.startsWith('F'))) {
-  // a walkable point in the room, as near its middle as possible
-  let best = null, bd = Infinity;
-  for (let i = 0; i < nav.n; i++) {
-    if (!nav.walk[i]) continue;
-    const x = nav.cx(i), z = nav.cz(i);
-    if (roomAt(x, z)?.id !== r.id) continue;
-    const d = Math.hypot(x - (r.x0 + r.x1) / 2, z - (r.z0 + r.z1) / 2);
-    if (d < bd) { bd = d; best = { x, z }; }
-  }
-  if (!best) { check(false, `${r.id}: has floor to stand on`); continue; }
-  const p = { x: 0, z: 5.5 };
-  const got = walk(p, best.x, best.z, passShut(new Set()));
-  check(got < 0.6, `${r.name} (${r.id}): reached (closest ${got.toFixed(2)} m)`);
-}
-
-// ---- every clock station and everything you use, within reach
-console.log('stations and things to use');
-const reachable = (s, label) => {
-  // some open floor near enough to reach it (and walk there)
-  let best = null, bd = Infinity;
-  for (let i = 0; i < nav.n; i++) {
-    if (!nav.walk[i] || nav.doorAt[i] >= 0) continue;
-    const x = nav.cx(i), z = nav.cz(i);
-    const d = Math.hypot(x - s.x, z - s.z);
-    if (d < bd) { bd = d; best = { x, z }; }
-  }
-  const ok = best && bd < REACH + (s.r || 0.3) - 0.3;
-  if (!ok) { check(false, `${label}: floor within reach (nearest ${bd.toFixed(2)} m)`); return; }
-  const p = { x: 0, z: 5.5 };
-  const got = walk(p, best.x, best.z, passShut(new Set()));
-  check(got < 0.6, `${label}: walk there (closest ${got.toFixed(2)} m)`);
+const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } };
+const solids = makeSolids();
+const big = solids.all.filter((b) => !b.small && b.y0 < 1.2);
+// does a car of this type at (x, z, h) hit anything it can't drive through?
+const carBlocked = (type, x, z, h) => {
+  const c = makeCar(0, type, x, z, h);
+  for (const b of solids.near(x, z, c.hl + 2)) if (!b.small && b.y0 < 1.2 && carVsBox(c, b)) return b;
+  return null;
 };
-for (const s of STATIONS) reachable(s, s.name);
-for (const [k, s] of Object.entries(SPOTS)) if (!k.startsWith('station') && !k.startsWith('hide:') && k !== 'uniform' && k !== 'car' && k !== 'cot') reachable(s, `spot ${k}`);
-for (const h of HIDES) reachable({ x: h.x, z: h.z, r: 0.6 }, `hiding place ${h.id}`);
-for (const [k, s] of Object.entries(DALE_SPOTS)) {
-  setDoors(new Set());
-  const p = { x: 0, z: 5.5 };
-  check(walk(p, s.x, s.z, passShut(new Set())) < 0.8, `Dale's ${k}: reachable once its door is open`);
-}
 
-// ---- locked gates keep you out
-console.log('locked gates');
+// ------------------------------------------------------------ the roads
 {
-  const shut = new Set(['H', 'halvBack', 'halvWest']);
-  setDoors(shut);
-  const p = { x: -30, z: 0 };
-  const got = walk(p, -52, 0, allOpen, 40);
-  check(got > 5 && p.x > -40, `Halvorsen's gate shut: you stay on the concourse (got to x ${p.x.toFixed(1)})`);
-  setDoors(new Set(['halvBack', 'halvWest']));
-  const q = { x: -30, z: 0 };
-  check(walk(q, -52, 0, passShut(new Set(['halvBack', 'halvWest'])), 60) < 0.6, "Halvorsen's gate up: in you go");
-  for (const sid of ['N3', 'S6']) {
-    const d = DOORS[DOOR_INDEX[sid]];
-    setDoors(new Set([sid, 'N3back']));
-    const r = { x: d.x, z: d.z + (d.at < 0 ? 2 : -2) };
-    const inside = { x: d.x, z: d.z + (d.at < 0 ? -4 : 4) };
-    walk(r, inside.x, inside.z, allOpen, 20);
-    check(roomAt(r.x, r.z)?.id !== sid, `${sid}'s gate shut: you can't get into the shop (ended in ${roomAt(r.x, r.z)?.id})`);
+  console.log('roads');
+  check(NODES.length === 36 && EDGES.length === 60, `a 6 by 6 grid of junctions (${NODES.length}, ${EDGES.length} roads)`);
+  let samples = 0, bad = 0, off = 0;
+  for (const e of EDGES) {
+    for (const from of [e.a, e.b]) {
+      const L = lane(e.id, from);
+      for (let t = 0; t <= L.len; t += 2) {
+        const x = L.x0 + L.dx * t, z = L.z0 + L.dz * t;
+        samples++;
+        if (carBlocked('van', x, z, L.h)) bad++;
+        if (!onRoad(x, z)) off++;
+      }
+    }
   }
+  check(bad === 0, `every lane has room for a van (${bad} of ${samples} spots blocked)`);
+  check(off === 0, `every lane is on the asphalt (${off} off)`);
+  // junctions: room to turn
+  let jBad = 0;
+  for (const n of NODES) for (let dx = -5; dx <= 5; dx += 2.5) for (let dz = -5; dz <= 5; dz += 2.5) for (const h of [0, Math.PI / 4, Math.PI / 2]) if (carBlocked('sedan', n.x + dx, n.z + dz, h)) jBad++;
+  check(jBad === 0, `junctions are clear to turn in (${jBad} blocked)`);
+  // traffic lights
+  let both = 0, red = 0;
+  for (const n of NODES) {
+    if (!hasLights(n.id)) continue;
+    for (let t = 0; t < CYCLE * 2; t += 0.25) {
+      const a = light(n.id, 'x', t), b = light(n.id, 'z', t);
+      if (a !== 'r' && b !== 'r') both++;
+      if (a === 'r' && b === 'r') red++;
+    }
+  }
+  check(both === 0, 'the lights never let both ways go at once');
+  check(red > 0, 'and have an all-red moment between');
+  check(NODES.filter((n) => hasLights(n.id)).length >= 30, 'nearly every junction has lights');
 }
 
-// ---- you start somewhere sensible
-console.log('start');
-for (const s of START_SPOTS) check(roomAt(s.x, s.z)?.id === 'court' && nav.walk[nav.idx(s.x, s.z)], `start spot (${s.x}, ${s.z}) is open floor in the court`);
+// ------------------------------------------------------------ parking
+{
+  console.log('parking');
+  let bad = 0, inLane = 0, overlap = 0;
+  const cars = PARKING.map((p) => makeCar(0, p.type || 'van', p.x, p.z, p.h));
+  PARKING.forEach((p, i) => {
+    if (carBlocked(p.type || 'van', p.x, p.z, p.h)) bad++;
+    // clear of the traffic lane (traffic passes 2.6 m from the middle)
+    for (const e of EDGES) {
+      for (const from of [e.a, e.b]) {
+        const L = lane(e.id, from);
+        const t = (p.x - L.x0) * L.dx + (p.z - L.z0) * L.dz;
+        if (t < -4 || t > L.len + 4) continue;
+        const side = Math.abs((p.x - L.x0) * L.rx + (p.z - L.z0) * L.rz);
+        const across = Math.abs(Math.sin(p.h - L.h)) > 0.5;
+        if (!across && side < 2.0) inLane++;
+      }
+    }
+    for (let j = i + 1; j < cars.length; j++) if (Math.abs(cars[i].x - cars[j].x) < 7 && Math.abs(cars[i].z - cars[j].z) < 7 && carVsCar(cars[i], cars[j])) overlap++;
+  });
+  check(PARKING.length >= 80, `plenty of parking (${PARKING.length})`);
+  check(bad === 0, `every space has room for a van (${bad} blocked)`);
+  check(inLane === 0, `no space sits in a traffic lane (${inLane})`);
+  check(overlap === 0, `no two spaces overlap (${overlap})`);
+}
 
-console.log(failures ? `${failures} FAILED` : 'all passed');
-process.exit(failures ? 1 : 0);
+// ------------------------------------------------------------ pavements
+{
+  console.log('pavements');
+  check(WALK_NODES.length >= 100, `a walking network (${WALK_NODES.length} corners)`);
+  const blockedNodes = WALK_NODES.filter((n) => !openAt(solids, n.x, n.z, 0.3));
+  check(blockedNodes.length === 0, `every corner has room to stand (${blockedNodes.length} blocked${blockedNodes.length ? `, e.g. ${blockedNodes[0].x.toFixed(1)}, ${blockedNodes[0].z.toFixed(1)}` : ''})`);
+  let samples = 0, blocked = 0, crossings = 0;
+  for (const a of WALK_NODES) {
+    for (const l of a.links) {
+      if (l.to < a.id) continue;
+      const b = WALK_NODES[l.to];
+      if (l.cross) crossings++;
+      const d = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let t = 0; t <= d; t += 1) {
+        samples++;
+        if (!openAt(solids, a.x + (b.x - a.x) * t / d, a.z + (b.z - a.z) * t / d, 0.25)) blocked++;
+      }
+    }
+  }
+  check(crossings >= 60, `crossings between blocks (${crossings})`);
+  check(blocked / samples < 0.04, `the pavements are clear enough to walk (${blocked} of ${samples} spots have something in the way)`);
+  check(WALK_NODES.every((n) => n.links.length >= 2), 'no dead ends');
+  check(LAMPS.length >= 150, `street lamps (${LAMPS.length})`);
+}
+
+// ------------------------------------------------------------ getting about on foot
+// flood the city on a half-metre grid from your place: everywhere a person
+// fits and can reach
+const R = 0.5, W = Math.ceil((BOUND * 2) / R);
+const reach = new Uint8Array(W * W);
+{
+  console.log('getting about on foot');
+  const idx = (x, z) => Math.floor((z + BOUND) / R) * W + Math.floor((x + BOUND) / R);
+  const fits = new Int8Array(W * W).fill(-1);
+  const fit = (i) => {
+    if (fits[i] < 0) { const x = -BOUND + (i % W + 0.5) * R, z = -BOUND + (Math.floor(i / W) + 0.5) * R; fits[i] = openAt(solids, x, z, PLAYER_R) ? 1 : 0; }
+    return fits[i];
+  };
+  const start = idx(PLACES.safehouse.x, PLACES.safehouse.z + 1.5);
+  check(fit(start), 'you start somewhere open');
+  const q = [start];
+  reach[start] = 1;
+  while (q.length) {
+    const i = q.pop();
+    const ix = i % W;
+    for (const j of [ix > 0 ? i - 1 : -1, ix < W - 1 ? i + 1 : -1, i - W, i + W]) {
+      if (j < 0 || j >= W * W || reach[j] || !fit(j)) continue;
+      reach[j] = 1;
+      q.push(j);
+    }
+  }
+  // near a spot: anywhere within r of it reachable?
+  const reachable = (x, z, r = 1.5) => {
+    for (let dz = -r; dz <= r; dz += R) for (let dx = -r; dx <= r; dx += R) {
+      const i = idx(x + dx, z + dz);
+      if (i >= 0 && i < W * W && reach[i]) return true;
+    }
+    return false;
+  };
+  let n = 0;
+  for (const [key, p] of Object.entries(PLACES)) {
+    n++;
+    check(reachable(p.x, p.z), `you can walk to ${p.name} (${key})`);
+  }
+  TAPES.forEach(([x, z], i) => {
+    check(openAt(solids, x, z, 0.3), `tape ${i + 1} isn't inside anything (${x}, ${z})`);
+    check(reachable(x, z, 1.0), `tape ${i + 1} can be reached (${x}, ${z})`);
+  });
+  for (const [x, z] of [[-150, 152], [15, 231], [158, -128], [0.5, -3.5], [-88, 84], [PLACES.hospital.x + 3, PLACES.hospital.z], [PLACES.police.x + 4, PLACES.police.z]]) {
+    check(reachable(x, z, 1.0), `the pickup at ${x}, ${z} can be reached`);
+  }
+  check(reachable(PLACES.hospital.x, PLACES.hospital.z + 1) && reachable(PLACES.police.x, PLACES.police.z + 1), 'you come back somewhere you can walk from');
+  void n;
+}
+
+// ------------------------------------------------------------ the jobs
+{
+  console.log('the jobs');
+  const spots = [];
+  for (const M of MISSIONS) {
+    for (const st of M.steps) {
+      if (st.do === 'car') {
+        const b = carBlocked(st.type, st.at.x, st.at.z, st.at.h);
+        check(!b, `${M.title}: the ${st.id} has room where it's parked (${st.at.x.toFixed(1)}, ${st.at.z.toFixed(1)})`);
+      }
+      if (st.do === 'convoy') st.at.forEach((a, k) => check(!carBlocked(st.type, a.x, a.z, a.h) && onRoad(a.x, a.z), `${M.title}: van ${k + 1} starts on the road`));
+      if (st.do === 'race') {
+        st.points.forEach(([x, z], k) => check(onRoad(x, z), `${M.title}: checkpoint ${k + 1} is on the road (${x}, ${z})`));
+        let len = 0;
+        for (let k = 1; k < st.points.length; k++) len += Math.hypot(st.points[k][0] - st.points[k - 1][0], st.points[k][1] - st.points[k - 1][1]);
+        check(len > 600, `${M.title}: a proper race (${len.toFixed(0)} m)`);
+      }
+      if (st.do === 'goto' || st.do === 'deliver') spots.push([M.title, st.do, st.at]);
+      if (st.do === 'peds' || st.do === 'pickup' || st.do === 'target') if (st.at) spots.push([M.title, st.do, st.at]);
+    }
+    check(M.pay > 0 && M.steps.length >= 3, `${M.title} pays and has steps`);
+  }
+  for (const [title, what, at] of spots) {
+    let ok = false;
+    for (let r = 0; r <= 4 && !ok; r += 0.5) for (let a = 0; a < 6.3 && !ok; a += 0.5) if (openAt(solids, at.x + Math.cos(a) * r, at.z + Math.sin(a) * r, 0.4)) ok = true;
+    check(ok, `${title}: somewhere open by the ${what} spot (${at.x.toFixed(1)}, ${at.z.toFixed(1)})`);
+  }
+  check(MISSIONS.filter((m) => m.final).length === 1 && MISSIONS[MISSIONS.length - 1].final, 'one last job, last');
+  check(BUILDINGS.some((b) => b.name === 'Pool Hall'), "there's a Pool Hall");
+  let named = 0, total = 0;
+  for (const e of EDGES) { const L = lane(e.id, e.a); total++; if (areaName((L.x0 + L.x1) / 2, (L.z0 + L.z1) / 2)) named++; }
+  check(named === total, 'every street is in a named part of town');
+}
+
+// ------------------------------------------------------------ driving
+{
+  console.log('driving');
+  const empty = { solids: makeSolids(), cars: [] };
+  // straight down x = 40 southbound lane (heading 0 is +z)
+  const L = lane(EDGES.find((e) => e.axis === 'z' && NODES[e.a].x === 40 && NODES[e.a].z === -200).id, NODES.find((n) => n.x === 40 && n.z === -200).id);
+  const c = makeCar(1, 'sedan', L.x0, L.z0, L.h);
+  for (let t = 0; t < 4; t += 1 / 60) stepCar(c, { throttle: 1, steer: 0 }, 1 / 60, empty);
+  check(c.v > 17 && c.v < CAR_TYPES.sedan.top, `a Marlin gets going (${c.v.toFixed(1)} m/s after 4 s)`);
+  check(Math.abs(c.h - L.h) < 0.01 && Math.abs(c.x - L.x0) < 0.05, 'and drives straight');
+  const z0 = c.z;
+  let stopT = 0;
+  while (c.v > 0.1 && stopT < 6) { stepCar(c, { throttle: -1, steer: 0 }, 1 / 60, empty); stopT += 1 / 60; }
+  check(stopT < 2.5, `the brakes stop it (${stopT.toFixed(2)} s)`);
+  check(c.z - z0 < 40, `within ${(c.z - z0).toFixed(1)} m`);
+  for (let t = 0; t < 2; t += 1 / 60) stepCar(c, { throttle: -1, steer: 0 }, 1 / 60, empty);
+  check(c.v < -3 && c.v > -CAR_TYPES.sedan.top * 0.31, `reverse (${c.v.toFixed(1)} m/s)`);
+  // turning right lowers the heading
+  const d = makeCar(2, 'sports', 0, -160, Math.PI / 2);
+  d.v = 10;
+  const h0 = d.h;
+  for (let t = 0; t < 1; t += 1 / 60) stepCar(d, { throttle: 0.3, steer: 1 }, 1 / 60, null);
+  check(d.h < h0 - 0.5, `steering right turns right (${(d.h - h0).toFixed(2)} rad)`);
+  // the handbrake slides
+  const e = makeCar(3, 'sports', 0, -160, Math.PI / 2), f = makeCar(4, 'sports', 0, -160, Math.PI / 2);
+  e.v = f.v = 25;
+  let se = 0, sf = 0;
+  for (let t = 0; t < 1; t += 1 / 60) { stepCar(e, { throttle: 0.5, steer: 1, handbrake: true }, 1 / 60, null); stepCar(f, { throttle: 0.5, steer: 1 }, 1 / 60, null); se = Math.max(se, Math.abs(e.s)); sf = Math.max(sf, Math.abs(f.s)); }
+  check(se > sf * 1.5 && se > 1, `the handbrake slides it (${se.toFixed(2)} vs ${sf.toFixed(2)} m/s sideways)`);
+  // into a building at speed
+  const b = BUILDINGS.find((q) => q.x1 - q.x0 > 10 && q.z1 - q.z0 > 10);
+  let impact = 0;
+  const g = makeCar(5, 'sedan', (b.x0 + b.x1) / 2, b.z0 - 12, 0);
+  g.v = 22;
+  let inside = 0;
+  for (let t = 0; t < 2; t += 1 / 60) {
+    stepCar(g, { throttle: 1, steer: 0 }, 1 / 60, { solids: empty.solids, cars: [], onHit: (car, n) => { impact = Math.max(impact, n); } });
+    inside = Math.max(inside, g.z + g.hl - b.z0);
+  }
+  check(impact > 15, `hitting a wall is a crash (${impact.toFixed(1)} m/s)`);
+  check(inside < 0.5, `and the wall holds (${inside.toFixed(2)} m in)`);
+  check(Math.abs(g.v) < 8, `and stops you (${g.v.toFixed(1)} m/s)`);
+  // a shunt: the car in front gets pushed along
+  const back = makeCar(6, 'van', 0, -165, Math.PI / 2), front = makeCar(7, 'sedan', 5.4, -165, Math.PI / 2);
+  back.v = 15;
+  const env = { solids: empty.solids, cars: [front], canPush: () => true };
+  for (let t = 0; t < 0.6; t += 1 / 60) stepCar(back, { throttle: 0, steer: 0 }, 1 / 60, env);
+  check(front.v > 5 && back.v < 15, `a shunt pushes the car in front (${front.v.toFixed(1)} m/s) and slows you (${back.v.toFixed(1)})`);
+  // cars can drive through the small stuff (lamp posts)
+  const lamp = solids.all.find((q) => q.small && q.prop === 'lamp');
+  check(!!lamp, 'lamp posts');
+}
+
+// ------------------------------------------------------------ walking into things
+{
+  console.log('walking into things');
+  const b = BUILDINGS[0];
+  const p = { x: (b.x0 + b.x1) / 2, z: b.z0 - 0.1 };
+  solids.resolveCircle(p, PLAYER_R, 0, true);
+  check(p.z <= b.z0 - PLAYER_R + 0.01, 'you can\'t walk into a building');
+  void big;
+}
+
+if (failures) { console.log(`\n${failures} check(s) failed`); process.exit(1); }
+console.log('\nall good');
