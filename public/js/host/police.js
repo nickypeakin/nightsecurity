@@ -41,9 +41,11 @@ export class Police {
     if (why === 'lost') this.m.radio(DISPATCH.clear);
   }
 
-  // a cop (or police car) has eyes on player p
+  // a cop (or police car) has eyes on player p (by: null for dispatch,
+  // which knows where they are until a unit has actually seen them)
   saw(p, by) {
     p.seenT = this.m.t;
+    if (by) p.found = true;
     const pos = this.m.outPos(p);
     p.lastSeen = { x: pos.x, z: pos.z };
   }
@@ -72,11 +74,12 @@ export class Police {
         const d = Math.hypot(c.x - pos.x, c.z - pos.z);
         if (d < 55 && m.solids.clear(c.x, 1.3, c.z, pos.x, 1.2, pos.z)) this.saw(p, c);
       }
-      // until a unit has caught up with them, dispatch knows where they
-      // are; after that it's down to what the police can see
+      // until a unit has seen them (or is right on top of them), dispatch
+      // knows where they are; after that it's down to what the police can
+      // see
       if (!p.found) {
-        for (const c of m.cars.values()) if (c.police && c.chasing === p.id && Math.hypot(c.x - pos.x, c.z - pos.z) < 70) p.found = true;
-        for (const c of m.peds.values()) if (c.kind === 'cop' && !c.dead && Math.hypot(c.x - pos.x, c.z - pos.z) < 70) p.found = true;
+        for (const c of m.cars.values()) if (c.police && c.chasing === p.id && Math.hypot(c.x - pos.x, c.z - pos.z) < 20) p.found = true;
+        for (const c of m.peds.values()) if (c.kind === 'cop' && !c.dead && Math.hypot(c.x - pos.x, c.z - pos.z) < 20) p.found = true;
         if (!p.found) this.saw(p, null);
       }
       // out of sight long enough: gone
