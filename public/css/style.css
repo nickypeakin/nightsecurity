@@ -264,7 +264,9 @@ select { font: 400 14px var(--ui); color: var(--ink); background: rgba(0, 0, 0, 
 /* the map (M) */
 #mapScreen { position: absolute; inset: 0; background: rgba(2, 4, 8, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; }
 #mapScreen[hidden] { display: none; }
-#mapScreen canvas { width: min(92vh, 92vw); height: min(84vh, 84vw); }
+#mapScreen canvas { width: min(96vw, 1500px); height: calc(100vh - 92px); border-radius: 6px; cursor: grab; touch-action: none; }
+#mapScreen canvas:active { cursor: grabbing; }
+#mapScreen .legend.keys { margin-top: 2px; color: #76828a; font-weight: 500; }
 #mapScreen .legend { font: 600 13px var(--ui); color: #98a4ac; margin: 8px 0 0; letter-spacing: 0.04em; }
 
 @media (max-width: 700px) {

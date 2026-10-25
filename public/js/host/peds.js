@@ -4,7 +4,7 @@
 // gang members (shoot), a getaway crew, and, for one job, the mannequins
 // from Halvorsen's, who only move while nobody is looking at them.
 
-import { WALK_NODES, light, nodeAt } from '../shared/city.js';
+import { WALK_NODES, light, nodeAt, groundY } from '../shared/city.js';
 import { circleVsCar } from '../shared/collide.js';
 import { PED, COP, WEAPONS, WEAPON_INDEX } from '../shared/config.js';
 import { BARKS } from '../shared/story.js';
@@ -56,7 +56,8 @@ export class Crowd {
 
   collide(p) {
     const m = this.m;
-    m.solids.resolveCircle(p, PED.r, 0, true);
+    p.y = groundY(p.x, p.z);
+    m.solids.resolveCircle(p, PED.r, p.y, true);
     // shoved out of the way by cars (being hit is dealt with by the host)
     for (const c of m.cars.values()) {
       if (Math.abs(c.x - p.x) > 4 || Math.abs(c.z - p.z) > 4) continue;
@@ -277,7 +278,8 @@ export class Crowd {
         p.downT -= dt;
         p.x += p.vx * dt; p.z += p.vz * dt;
         p.vx *= Math.exp(-4 * dt); p.vz *= Math.exp(-4 * dt);
-        m.solids.resolveCircle(p, PED.r, 0, true);
+        p.y = groundY(p.x, p.z);
+        m.solids.resolveCircle(p, PED.r, p.y, true);
         p.anim = A.down;
         if (p.downT <= 0 && p.kind === 'civ') { p.mode = 'flee'; p.fleeT = 8; p.fromX = p.x - p.vx; p.fromZ = p.z - p.vz; }
         continue;

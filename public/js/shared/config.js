@@ -3,7 +3,7 @@
 export const MAX_PLAYERS = 4;
 export const PEER_PREFIX = 'gsgs-kingsgate-city-';
 // bump whenever host and guest messages change: mismatched copies refuse to mix
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 
 // the host runs the city 20 times a second and tells everyone 10 times
 export const TICK = 1 / 20;

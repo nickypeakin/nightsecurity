@@ -1,11 +1,11 @@
 # GTA 7
 
-A fan-made open-world crime game in the browser, in the spirit of the old 3D
-GTA games, for you and up to three friends. Steal cars, outrun the police,
-walk into buildings and take jobs from the people who run the city of
-Kingsgate, from morning till night and round again. The story, places and
-characters are original. (GTA 7 isn't affiliated with or endorsed by
-Rockstar Games.)
+A fan-made open-world crime game in the browser, in the spirit of the GTA
+games, for you and up to three friends. Steal cars, outrun the police, walk
+into buildings and take jobs from the people who run the city of Kingsgate,
+then take the highway out of town and see the rest of the island, from
+morning till night and round again. The story, places, characters and map
+are original. (GTA 7 isn't affiliated with or endorsed by Rockstar Games.)
 
 November 1996. Kingsgate Mall, where you used to work nights as a security
 guard, is a fenced-off pile of rubble now, and the job went with it. The game
@@ -30,6 +30,30 @@ Sal's Diner puts you back to full health, and Spray-N-Go will respray your
 car and make the police forget you were ever in it. Days pass (a whole one
 takes 48 minutes): the street lights and lit windows come on at dusk.
 
+## The island
+
+Kingsgate is on the south coast of an island about 2 km across and 3 km
+from end to end, laid out the way GTA V's is (a city in the south, hills,
+desert, a lake and a big mountain to the north) but drawn from scratch:
+
+- **Kingsgate**, the city, with its harbour, on the south coast.
+- **Pelican Beach** just west of town, with its pier and café, and
+  **Kingsgate International**, the airport, out on the peninsula beyond it.
+- **The Kingsgate Hills** north of town, with the big white sign, the
+  villas and the winding Hill Road.
+- **The Redwater Desert** in the middle of the island, with an airstrip,
+  and **Lake Corrigan** north of it. **Dust Creek** (a bar, a motel, a gas
+  station and trailers) is where the freeway meets the Desert Road.
+- **Mount Calder** and a wind farm in the east; **Mount Harlow**, the
+  island's highest point (with a mast on top), in the north-west, in the
+  pine forests round **Port Kerry** at the northern tip.
+
+The **Coast Highway** runs up the west coast, the **Eastern Freeway** up the
+middle-east, the **Shore Road** up the east side, the **Desert Road** across
+the middle and the **Hill Road** over the hills, about 10 km of road in
+all, with traffic on it. Press **M** for the map: scroll (or + and -) to
+zoom, drag (or the arrow keys) to move it about.
+
 **Play it:** <https://nickypeakin.github.io/nightsecurity/>. It works in
 Chrome, Edge or Firefox on a computer with a keyboard and mouse. Headphones
 help.
@@ -47,7 +71,7 @@ help.
 | Space | jump | handbrake |
 | H, G, R | | horn, siren (police cars), radio |
 | E | buy at the gun counter, eat at the diner | |
-| M | the map | the map |
+| M | the map (scroll to zoom, drag to move) | the map |
 | Space | skip the opening, or a job's cutscene | |
 | Esc | pause | pause |
 
@@ -116,11 +140,22 @@ npm test         # plays every job headless, and checks the city's layout
 Plain JavaScript modules and [three.js](https://threejs.org). Every model,
 texture and sound is generated in code, so there are no asset files.
 
-The rooms you can walk into are laid out off the east edge of the map, behind
-the city's wall: a door takes you there (with a quick fade), and while you're
-inside only that room is drawn, lit by the same light-grid shader as the
-streets (its ceiling lights are always on). The sun, the sky and the haze
-follow a 24-hour clock that starts at 8 AM.
+The island is plain numbers too (`shared/world.js`): a coastline, a height
+for every 5 m worked out from a few hills and mountains, noise, beaches and
+cliffs, the lake's hollow and the city's flat ground, and the highways as
+smooth curves that the land is cut and banked to fit, never steeper than 1
+in 9. The highways join the city's road graph as chains of junctions, so the
+traffic, the police and the jobs' drivers use them like any street. The
+land is drawn a 320 m square at a time (the far squares with a quarter of
+the triangles, and a skirt so they never show a crack), the trees and rocks
+merged a square at a time too, and from far off each square of town is a
+single mesh of plain boxes whose windows still light up at night.
+
+The rooms you can walk into are laid out out at sea, off the south-east
+coast, where nobody will see them: a door takes you there (with a quick
+fade), and while you're inside only that room is drawn, lit by the same
+light-grid shader as the streets (its ceiling lights are always on). The
+sun, the sky and the haze follow a 24-hour clock that starts at 8 AM.
 
 The city is laid out once, in `shared/city.js`, as plain numbers: a six by
 six grid of junctions 80 m apart with traffic lights, the districts and
@@ -141,6 +176,8 @@ public/
   js/shared/              rules the host and every client agree on
     config.js             tuning numbers: speeds, weapons, wanted levels,
                           prices, the clock (a day, sunrise and sunset)
+    world.js              the island: the coast, the land's heights, the
+                          highways, the towns, the trees
     city.js               the roads, lanes and lights, blocks and buildings,
                           parking, lamps, the walking network, collision
     interiors.js          the rooms you can walk into, their doors, furniture
@@ -164,25 +201,31 @@ public/
                           the camera, the HUD, the map, the shop
     cityScene.js          the city, built from the plan; the sky, the sun and
                           the time of day
+    countryScene.js       the island round it: the land, the sea and the
+                          lake, the highways, the trees, the landmarks
     interiorScene.js      the rooms, furnished, and the doors out in the city
     opening.js            the opening: the city, your place, the phone call
     lighting.js           the street-light (and ceiling-light) shader patch
     vehicles.js           the six car models, lights, sirens
     people.js, humans.js  procedural people, skinned for crowds, and their guns
-    radar.js              the radar and the map
+    radar.js              the radar and the map of the island
     fx.js                 muzzle flashes, tracers, fire, smoke, markers, pickups
     post.js               tone mapping, bloom, the VHS look
     audio.js, voice.js    synthesised engines, guns, sirens, radio; spoken lines
     ui.js, net.js, input.js, attract.js, textures.js, props.js, util.js
 test/
   sim.test.js             waking up at home with your car, traffic and crowds,
-                          the police, busted and wasted, carjacking, fires,
-                          the gun counter and the diner, saving, co-op, and
-                          all seven jobs played start to finish
+                          traffic out on the highways and a drive to Port
+                          Kerry, the police, busted and wasted, carjacking,
+                          fires, the gun counter and the diner, saving, co-op,
+                          and all seven jobs played start to finish
   walk.test.js            every lane, junction and parking space has room for
                           a car; every place, tape, pickup and door can be
                           walked to; inside, every room's counter, bed and
-                          giver can be reached; the lights; the car physics
+                          giver can be reached; the lights; the island (sea
+                          all round, the highways out of the water and never
+                          too steep, level ground for every building); the
+                          car physics, hills and the sea's edge included
 ```
 
 The host decides everything that matters (where every car and person is,

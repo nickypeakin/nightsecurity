@@ -1,6 +1,6 @@
 // Kingsgate's street lights. There are hundreds of lamps, far too many for
 // ordinary three.js lights, so they live on a grid of 12 m squares laid
-// over the whole city (at most one lamp to a square, anywhere inside it):
+// over the whole island (at most one lamp to a square, anywhere inside it):
 // the client's shader looks at the nine squares round each pixel, and a
 // lamp lights everything within one square's width of it. Knocked-down
 // lamps go dark by clearing their square.
@@ -8,9 +8,9 @@
 import { LAMPS } from './city.js';
 import { INTERIORS, ROOM_H } from './interiors.js';
 
-// (the grid runs on east past the city's wall to cover the rooms you can
-// walk into; their lights are always on)
-export const LGRID = { x0: -252, z0: -252, cell: 12, nx: 45, nz: 42 };
+// (the grid covers the whole island, and the rooms you can walk into out
+// at sea to the south-east; their lights are always on)
+export const LGRID = { x0: -1000, z0: -2800, cell: 12, nx: 170, nz: 272 };
 export const REACH = LGRID.cell;
 export const FALLOFF = 0.022;
 

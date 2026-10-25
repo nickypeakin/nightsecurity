@@ -5,6 +5,7 @@
 // glowing markers for jobs and checkpoints, and the pickups.
 
 import * as THREE from 'three';
+import { groundY } from '../shared/city.js';
 import * as TX from './textures.js';
 
 const MAX = 600;
@@ -117,7 +118,7 @@ export class Fx {
   }
 
   explosion(x, z) {
-    const y = 1;
+    const y = groundY(x, z) + 1;
     for (let k = 0; k < 26; k++) {
       const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 7;
       this.glow.add({ x, y: y + Math.random(), z, vx: Math.cos(a) * s, vy: 2 + Math.random() * 6, vz: Math.sin(a) * s, drag: 2.5, life: 0.5 + Math.random() * 0.5, size: 2.2 + Math.random() * 2, grow: 0.8, color: [1, 0.55 + Math.random() * 0.2, 0.2], flicker: true });
@@ -127,15 +128,15 @@ export class Fx {
       this.smoke.add({ x, y: y + Math.random() * 2, z, vx: Math.cos(a) * s, vy: 2 + Math.random() * 3, vz: Math.sin(a) * s, drag: 1.2, rise: 0.5, life: 2.5 + Math.random() * 2, size: 3, grow: 2.5, color: [0.12, 0.11, 0.1], alpha: 0.75, fadeIn: true });
     }
     for (let k = 0; k < 20; k++) this.glow.add({ x, y: y + 0.5, z, vx: (Math.random() - 0.5) * 22, vy: 4 + Math.random() * 10, vz: (Math.random() - 0.5) * 22, rise: -14, life: 0.8 + Math.random() * 0.6, size: 0.2, color: [1, 0.7, 0.3] });
-    this.light(x, 2, z, 30, 0.6);
+    this.light(x, y + 1, z, 30, 0.6);
   }
 
   // a damaged car smokes; a burning one burns
   carSmoke(x, z, dark) {
-    this.smoke.add({ x: x + (Math.random() - 0.5) * 0.6, y: 1.0, z: z + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 0.4, vy: 1.4, vz: (Math.random() - 0.5) * 0.4, rise: 0.3, life: 2.2, size: 0.9, grow: 2.5, color: dark ? [0.08, 0.08, 0.08] : [0.45, 0.45, 0.45], alpha: dark ? 0.7 : 0.35, fadeIn: true });
+    this.smoke.add({ x: x + (Math.random() - 0.5) * 0.6, y: groundY(x, z) + 1.0, z: z + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 0.4, vy: 1.4, vz: (Math.random() - 0.5) * 0.4, rise: 0.3, life: 2.2, size: 0.9, grow: 2.5, color: dark ? [0.08, 0.08, 0.08] : [0.45, 0.45, 0.45], alpha: dark ? 0.7 : 0.35, fadeIn: true });
   }
   fire(x, z) {
-    this.glow.add({ x: x + (Math.random() - 0.5) * 1.4, y: 0.9 + Math.random() * 0.4, z: z + (Math.random() - 0.5) * 1.4, vx: 0, vy: 2 + Math.random() * 1.5, vz: 0, life: 0.45, size: 1.2 + Math.random(), color: [1, 0.5 + Math.random() * 0.2, 0.15], flicker: true });
+    this.glow.add({ x: x + (Math.random() - 0.5) * 1.4, y: groundY(x, z) + 0.9 + Math.random() * 0.4, z: z + (Math.random() - 0.5) * 1.4, vx: 0, vy: 2 + Math.random() * 1.5, vz: 0, life: 0.45, size: 1.2 + Math.random(), color: [1, 0.5 + Math.random() * 0.2, 0.15], flicker: true });
     if (Math.random() < 0.3) this.carSmoke(x, z, true);
   }
 

@@ -10,7 +10,9 @@
 
 import { Match, INTRO_LEN } from '../public/js/host/match.js';
 import { TICK, WEAPONS, PRICES, MAX_HP } from '../public/js/shared/config.js';
-import { PLACES, onRoad, openAt } from '../public/js/shared/city.js';
+import { PLACES, NODES, onRoad, openAt, inWater, groundY } from '../public/js/shared/city.js';
+import { ROUTE, along } from '../public/js/shared/world.js';
+import { Driver } from '../public/js/host/drivers.js';
 import { INTERIOR, interiorAt } from '../public/js/shared/interiors.js';
 import { MISSIONS, TAPES, TAPE_PAY } from '../public/js/shared/story.js';
 
@@ -52,7 +54,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
     // shoot at a point from where player i stands
     shoot: (i, x, y, z, w = P(i).w) => {
       const p = P(i), pos = m.playerPos(p);
-      const o = [pos.x, 1.45, pos.z], d = [x - o[0], y - o[1], z - o[2]], l = Math.hypot(...d);
+      // (heights over the ground, as a browser aims: the vans may be out in the hills)
+      const o = [pos.x, groundY(pos.x, pos.z) + 1.45, pos.z], d = [x - o[0], y + groundY(x, z) - o[1], z - o[2]], l = Math.hypot(...d);
       m.handle(p.id, { t: 'fire', w, o, d: d.map((v) => v / l) });
     },
     msgs: (t) => log.filter((e) => e.msg.t === t).map((e) => e.msg),
@@ -151,6 +154,67 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   check(bytes < 24000, `snapshots stay small (${bytes} bytes)`);
   check(snap.p.length === 2 && snap.c.length === m.cars.size, 'snapshots carry everyone');
   check(snap.intro === -1, 'the intro was skipped');
+}
+
+// ------------------------------------------------------ out of town
+{
+  console.log('out of town');
+  const H = setup(1, 'country');
+  const { m, P } = H;
+  // stand by the Eastern Freeway out in the country: traffic comes past at
+  // highway speeds, and stays on the road (and out of the lake)
+  const R = ROUTE.eastN, mid = along(R, R.len * 0.3);
+  H.go(0, mid.x - mid.dz * 12, mid.z + mid.dx * 12);
+  let offRoad = 0, samples = 0, fast = 0, wet = 0, floating = 0;
+  const moved = new Map();
+  for (let k = 0; k < 60 / TICK; k++) {
+    H.st(0);
+    m.step(TICK);
+    if (k % 20 || k < 100) continue;
+    for (const c of m.cars.values()) {
+      if (!c.ai || c.ai.mode !== 'cruise') continue;
+      samples++;
+      if (!onRoad(c.x, c.z)) offRoad++;
+      if (inWater(c.x, c.z)) wet++;
+      if (Math.abs(c.y - groundY(c.x, c.z)) > 0.05) floating++;
+      if (c.v > 15) fast++;
+      const q = moved.get(c.id) || { x: c.x, z: c.z, d: 0 };
+      q.d += Math.hypot(c.x - q.x, c.z - q.z); q.x = c.x; q.z = c.z;
+      moved.set(c.id, q);
+    }
+  }
+  const far = [...moved.values()].filter((q) => q.d > 150).length;
+  console.log(`  ${moved.size} cars came by, ${far} drove 150 m+, ${Math.round((fast / samples) * 100)}% of the time over 54 km/h`);
+  check(moved.size >= 5, `traffic out on the highway (${moved.size})`);
+  check(far >= 4, `and it keeps moving (${far})`);
+  check(fast / samples > 0.3, `at highway speeds (${fast} of ${samples})`);
+  check(offRoad / samples < 0.05, `on the road (${offRoad} of ${samples} off)`);
+  check(wet === 0 && floating === 0, 'never in the water, never off the ground');
+  // a long drive: from town to Port Kerry at the top of the island
+  const port = NODES.find((n) => n.name === 'port');
+  const s0 = along(ROUTE.eastS, 60);
+  const c = m.spawnCar('sedan', s0.x + s0.dz * 2.6 * -1, s0.z + s0.dx * 2.6, Math.atan2(s0.dx, s0.dz));
+  c.mission = true;
+  c.ai = new Driver(m, c, 'route');
+  c.ai.goal = port.id;
+  let t = 0, stuck = 0;
+  while (t < 400 && Math.hypot(c.x - port.x, c.z - port.z) > 40) {
+    H.go(0, c.x + 30, c.z);
+    H.st(0);
+    m.step(TICK);
+    t += TICK;
+    if (Math.abs(c.v) < 1) stuck += TICK;
+  }
+  console.log(`  town to Port Kerry in ${t.toFixed(0)} s (${stuck.toFixed(0)} s stopped)`);
+  check(Math.hypot(c.x - port.x, c.z - port.z) <= 40, `a car can drive from town to Port Kerry (${Math.hypot(c.x - port.x, c.z - port.z).toFixed(0)} m off after ${t.toFixed(0)} s)`);
+  // crime out in the hills still brings the police
+  const p = P(0);
+  H.go(0, along(ROUTE.hill, 400).x + 10, along(ROUTE.hill, 400).z);
+  H.step(3);
+  m.police.crime(p, 3, 2);
+  let units = 0;
+  for (let k = 0; k < 40 / TICK && !units; k++) { H.st(0); m.step(TICK); units = [...m.cars.values()].filter((q) => q.police && q.chasing === p.id).length; }
+  check(units >= 1, 'the police come out to the hills too');
 }
 
 // ------------------------------------------------------ the intro

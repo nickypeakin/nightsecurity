@@ -7,7 +7,7 @@
 
 import { TICK, SNAP_EVERY, PLAYER_R, REACH, MAX_HP, MAX_ARMOR, WEAPONS, WEAPON_INDEX, PRICES, SPAWN_NEAR, SPAWN_FAR, DESPAWN, PEDS_PER_PLAYER, PEDS_MAX, TRAFFIC_PER_PLAYER, TRAFFIC_MAX, PED, hourAt, sunAt } from '../shared/config.js';
 import { makeRng } from '../shared/rng.js';
-import { PLACES, PARKING, EDGES, WALK_NODES, lane, openAt, areaName } from '../shared/city.js';
+import { PLACES, PARKING, EDGES, WALK_NODES, lane, openAt, areaName, edgesNear, groundY } from '../shared/city.js';
 import { INTERIOR, interiorAt, worldSolids } from '../shared/interiors.js';
 import { rayCar, rayPerson, rayBox, circleVsCar, carVsCar } from '../shared/collide.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS, PAINT, TAXI_PAINT, carVel } from '../shared/car.js';
@@ -494,7 +494,7 @@ export class Match {
     this.crowd.scare(ox, oz, 40, { cower: true });
     for (const c of this.peds.values()) {
       if (c.kind !== 'cop' || c.dead) continue;
-      if (Math.hypot(c.x - ox, c.z - oz) < 45 && this.solids.clear(c.x, 1.6, c.z, ox, oy, oz)) { this.police.crime(p, 0.6, 1); break; }
+      if (Math.hypot(c.x - ox, c.z - oz) < 45 && this.solids.clear(c.x, 1.6, c.z, ox, oy - groundY(ox, oz), oz)) { this.police.crime(p, 0.6, 1); break; }
     }
     for (const c of this.cars.values()) {
       if (!c.police || c.dead || !c.ai) continue;
@@ -521,7 +521,8 @@ export class Match {
       if (t >= 0 && t < best.t) best = { t, car: c };
     }
     for (const o of this.objects.values()) {
-      const h = rayBox(ox, oy, oz, dx, dy, dz, { x0: o.x - o.w, x1: o.x + o.w, y0: 0, y1: o.h * 2, z0: o.z - o.w, z1: o.z + o.w }, best.t);
+      const y0 = groundY(o.x, o.z);
+      const h = rayBox(ox, oy, oz, dx, dy, dz, { x0: o.x - o.w, x1: o.x + o.w, y0, y1: y0 + o.h * 2, z0: o.z - o.w, z1: o.z + o.w }, best.t);
       if (h && h.t < best.t) best = { t: h.t, object: o };
     }
     return best;
@@ -815,8 +816,10 @@ export class Match {
     const wantCars = Math.min(TRAFFIC_MAX, TRAFFIC_PER_PLAYER * alive.length);
     for (let n = 0; n < Math.min(2, wantCars - traffic); n++) {
       const who = pos[Math.floor(this.rng() * pos.length)];
+      const near = edgesNear(who.x, who.z, SPAWN_FAR + 15);
+      if (!near.length) continue;
       for (let tries = 0; tries < 14; tries++) {
-        const e = EDGES[Math.floor(this.rng() * EDGES.length)];
+        const e = near[Math.floor(this.rng() * near.length)];
         const L = lane(e.id, this.rng() < 0.5 ? e.a : e.b);
         const t = 0.1 + this.rng() * 0.8;
         const x = L.x0 + (L.x1 - L.x0) * t, z = L.z0 + (L.z1 - L.z0) * t;
@@ -890,6 +893,7 @@ function stepCarDead(m, c, dt) {
   c.w *= Math.exp(-3 * dt);
   c.x += Math.sin(c.h) * c.v * dt;
   c.z += Math.cos(c.h) * c.v * dt;
+  c.y = groundY(c.x, c.z);
 }
 
 export function carState(c) { return [r2(c.x), r2(c.z), r2(c.h), r2(c.v), r2(c.s), r2(c.w), r2(c.steer), Math.round(c.hp)]; }

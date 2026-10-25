@@ -1,13 +1,15 @@
-// Checks the city itself, without running it: every lane, junction and
-// parking space has room for a car; the pavements, crossings and every
-// named place have room for a person; everywhere that matters (the jobs,
-// the tapes, the pickups) can be walked to from your place; the traffic
-// lights never show green both ways; and the car physics drives, brakes,
-// steers, slides and crashes the way it should.
+// Checks the city and the island itself, without running them: every lane,
+// junction and parking space has room for a car; the pavements, crossings
+// and every named place have room for a person; everywhere that matters
+// (the jobs, the tapes, the pickups) can be walked to from your place; the
+// traffic lights never show green both ways; the highways reach every part
+// of the island and stay out of the sea; and the car physics drives, brakes,
+// steers, slides, crashes and climbs hills the way it should.
 //
 // usage: node test/walk.test.js
 
-import { NODES, EDGES, lane, light, hasLights, CYCLE, PARKING, WALK_NODES, PLACES, BUILDINGS, LAMPS, BOUND, onRoad, areaName, makeSolids, openAt } from '../public/js/shared/city.js';
+import { NODES, EDGES, CITY_EDGES, EXITS, lane, light, hasLights, CYCLE, PARKING, WALK_NODES, PLACES, BUILDINGS, LAMPS, onRoad, areaName, makeSolids, openAt, groundY, inWater } from '../public/js/shared/city.js';
+import { ROUTES, COUNTRY, FLORA, PEAKS, SUMMIT, LAKE, SEA_Y, ROOMS_BOX, heightAt, shoreDist, lakeQ } from '../public/js/shared/world.js';
 import { makeCar, stepCar, CAR_TYPES } from '../public/js/shared/car.js';
 import { carVsBox, carVsCar } from '../public/js/shared/collide.js';
 import { MISSIONS, TAPES } from '../public/js/shared/story.js';
@@ -18,18 +20,18 @@ import { FIXTURES } from '../public/js/shared/lights.js';
 let failures = 0;
 const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } };
 const solids = makeSolids();
-const big = solids.all.filter((b) => !b.small && b.y0 < 1.2);
 // does a car of this type at (x, z, h) hit anything it can't drive through?
 const carBlocked = (type, x, z, h) => {
   const c = makeCar(0, type, x, z, h);
-  for (const b of solids.near(x, z, c.hl + 2)) if (!b.small && b.y0 < 1.2 && carVsBox(c, b)) return b;
+  for (const b of solids.near(x, z, c.hl + 2)) if (!b.small && b.y0 < c.y + 1.2 && b.y1 > c.y + 0.25 && carVsBox(c, b)) return b;
   return null;
 };
 
 // ------------------------------------------------------------ the roads
 {
   console.log('roads');
-  check(NODES.length === 36 && EDGES.length === 60, `a 6 by 6 grid of junctions (${NODES.length}, ${EDGES.length} roads)`);
+  check(NODES.filter((n) => n.city).length === 36 && CITY_EDGES === 60, `a 6 by 6 grid of streets in town (${CITY_EDGES} streets)`);
+  check(EXITS.length === 5 && NODES.length > 300, `and highways out of town on all sides (${EXITS.length} ways out, ${NODES.length} junctions in all)`);
   let samples = 0, bad = 0, off = 0;
   for (const e of EDGES) {
     for (const from of [e.a, e.b]) {
@@ -60,7 +62,13 @@ const carBlocked = (type, x, z, h) => {
   }
   check(both === 0, 'the lights never let both ways go at once');
   check(red > 0, 'and have an all-red moment between');
-  check(NODES.filter((n) => hasLights(n.id)).length >= 30, 'nearly every junction has lights');
+  check(NODES.filter((n) => hasLights(n.id)).length >= 30, 'nearly every junction in town has lights');
+  check(NODES.every((n) => n.city || !hasLights(n.id)), "and there aren't any out on the highways");
+  // you can drive from anywhere to anywhere, and never hit a dead end
+  const seen = new Set([0]), q = [0];
+  while (q.length) { const u = q.pop(); for (const eid of NODES[u].edges) { const e = EDGES[eid], v = e.a === u ? e.b : e.a; if (!seen.has(v)) { seen.add(v); q.push(v); } } }
+  check(seen.size === NODES.length, `every road joins up (${seen.size} of ${NODES.length})`);
+  check(NODES.every((n) => n.edges.length >= 2), 'no dead ends');
 }
 
 // ------------------------------------------------------------ parking
@@ -115,13 +123,14 @@ const carBlocked = (type, x, z, h) => {
 }
 
 // ------------------------------------------------------------ getting about on foot
-// flood the city on a half-metre grid from your place: everywhere a person
-// fits and can reach
+// flood the city (and a little way out of it) on a half-metre grid from
+// your place: everywhere a person fits and can reach
+const BOUND = 250;
 const R = 0.5, W = Math.ceil((BOUND * 2) / R);
 const reach = new Uint8Array(W * W);
 {
   console.log('getting about on foot');
-  const idx = (x, z) => Math.floor((z + BOUND) / R) * W + Math.floor((x + BOUND) / R);
+  const idx = (x, z) => (x < -BOUND || z < -BOUND || x >= BOUND || z >= BOUND ? -1 : Math.floor((z + BOUND) / R) * W + Math.floor((x + BOUND) / R));
   const fits = new Int8Array(W * W).fill(-1);
   const fit = (i) => {
     if (fits[i] < 0) { const x = -BOUND + (i % W + 0.5) * R, z = -BOUND + (Math.floor(i / W) + 0.5) * R; fits[i] = openAt(solids, x, z, PLAYER_R) ? 1 : 0; }
@@ -171,7 +180,8 @@ const reach = new Uint8Array(W * W);
   const all = worldSolids();
   check(INTERIORS.length >= 6, `rooms to walk into (${INTERIORS.length})`);
   for (const r of INTERIORS) {
-    check(r.box.x0 > BOUND + 20, `${r.name} is out of sight of the city`);
+    check(r.box.x0 >= ROOMS_BOX.x0 && r.box.x1 <= ROOMS_BOX.x1 && r.box.z0 >= ROOMS_BOX.z0 && r.box.z1 <= ROOMS_BOX.z1 && shoreDist((r.box.x0 + r.box.x1) / 2, (r.box.z0 + r.box.z1) / 2) < -200, `${r.name} is well out of sight, out at sea`);
+    check(groundY(r.entry.x, r.entry.z) > 0 && !inWater(r.entry.x, r.entry.z), `${r.name} has a floor to stand on`);
     check(interiorAt(r.entry.x, r.entry.z) === r && !interiorAt(r.door.x, r.door.z), `${r.name}: the door goes from the street to the room`);
     check(FIXTURES.some((f) => f.room === r.id), `${r.name} has a light`);
     for (const o of INTERIORS) if (o !== r) check(o.box.x1 < r.box.x0 || o.box.x0 > r.box.x1 || o.box.z1 + 10 < r.box.z0 || o.box.z0 > r.box.z1 + 10, `${r.name} and ${o.name} don't share walls`);
@@ -297,7 +307,96 @@ const reach = new Uint8Array(W * W);
   const p = { x: (b.x0 + b.x1) / 2, z: b.z0 - 0.1 };
   solids.resolveCircle(p, PLAYER_R, 0, true);
   check(p.z <= b.z0 - PLAYER_R + 0.01, 'you can\'t walk into a building');
-  void big;
+  const c = COUNTRY.buildings.find((q) => q.name === 'The Rusty Spur');
+  const q = { x: (c.x0 + c.x1) / 2, z: c.z0 - 0.1 };
+  solids.resolveCircle(q, PLAYER_R, groundY(q.x, q.z), true);
+  check(q.z <= c.z0 - PLAYER_R + 0.01, 'nor into one up in the hills or out in the desert');
+}
+
+// ------------------------------------------------------------ the island
+{
+  console.log('the island');
+  const flat = [[0, 0], [-150, 150], [190, -190], [0, 230]].every(([x, z]) => Math.abs(groundY(x, z)) < 0.2);
+  check(flat, 'the city is flat');
+  // sea all round the edge
+  let wet = 0, n = 0;
+  for (let x = -990; x <= 910; x += 50) for (const z of [-2790, 425]) { if (x > ROOMS_BOX.x0 - 5 && x < ROOMS_BOX.x1 + 5) continue; n++; if (inWater(x, z)) wet++; }
+  for (let z = -2790; z <= 425; z += 50) for (const x of [-990, 910]) { n++; if (inWater(x, z)) wet++; }
+  check(wet === n, `the sea all the way round (${wet} of ${n})`);
+  check(SUMMIT.y > 250 && Math.hypot(SUMMIT.x - PEAKS[0][0], SUMMIT.z - PEAKS[0][1]) < 150, `Mount Harlow towers over everything (${SUMMIT.y.toFixed(0)} m)`);
+  check(inWater(LAKE.x, LAKE.z) && heightAt(LAKE.x, LAKE.z) < LAKE.y - 3 && !inWater(LAKE.x, LAKE.z + LAKE.rz * 1.6), 'Lake Corrigan, with a shore round it');
+  // the highways: above the water, never too steep, the right way out of town
+  let low = 0, steep = 0, wetLane = 0, pts = 0;
+  for (const r of ROUTES) {
+    for (let i = 1; i < r.pts.length; i++) {
+      const a = r.pts[i - 1], b = r.pts[i];
+      pts++;
+      if (b.y < SEA_Y + 1 || inWater(b.x, b.z)) low++;
+      if (Math.abs(b.y - a.y) / (b.s - a.s) > 0.12) steep++;
+      if (Math.abs(groundY(b.x, b.z) - b.y) > 0.3 && Math.abs(b.x) > 215) wetLane++;
+    }
+  }
+  check(low === 0, `the highways stay out of the water (${low} of ${pts} points)`);
+  check(steep === 0, `and are never steeper than 1 in 8 (${steep})`);
+  check(wetLane === 0, `the land's cut and banked to fit them (${wetLane} points off)`);
+  check(ROUTES.reduce((s, r) => s + r.len, 0) > 8000, `kilometres of highway (${(ROUTES.reduce((s, r) => s + r.len, 0) / 1000).toFixed(1)} km)`);
+  // the towns
+  const towns = new Set(COUNTRY.towns.map((t) => t.name));
+  check(['Pelican Beach', 'Dust Creek', 'Port Kerry'].every((t) => towns.has(t)), 'towns out of town');
+  let tilted = 0, sunk = 0;
+  for (const b of COUNTRY.buildings) {
+    if (b.onPier) continue;
+    for (const [x, z] of [[b.x0, b.z0], [b.x1, b.z0], [b.x0, b.z1], [b.x1, b.z1]]) if (Math.abs(heightAt(x, z) - b.y) > 0.6) tilted++;
+    if (inWater((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2)) sunk++;
+  }
+  check(tilted === 0, `every building out of town stands on level ground (${tilted} corners off)`);
+  check(sunk === 0, 'and none of them is in the water');
+  check(FLORA.length > 3000 && FLORA.every((f) => !inWater(f.x, f.z)), `trees, bushes and rocks (${FLORA.length}), none in the water`);
+  const P = COUNTRY.pier;
+  check(groundY((P.x0 + P.x1) / 2, (P.z0 + P.z1) / 2) === P.y && inWater(P.x0 + 5, P.z0 - 3) && !inWater(P.x0 + 5, (P.z0 + P.z1) / 2), 'the pier runs out over the sea, and you can walk on it');
+  // where you are
+  const at = (x, z) => areaName(x, z);
+  check(at(-330, 40) === 'Pelican Beach' && at(0, -2560) === 'Port Kerry' && at(SUMMIT.x, SUMMIT.z) === 'Mount Harlow' && at(LAKE.x, LAKE.z) === 'Lake Corrigan' && at(-100, -420) === 'Kingsgate Hills', 'the island has names');
+  check(lakeQ(LAKE.x, LAKE.z) < 0.5, '(the lake is where it says)');
+  // you can't see through a mountain
+  const S = SUMMIT;
+  check(!solids.clear(S.x - 400, 2, S.z, S.x + 400, 2, S.z), "hills block the view (and the bullets)");
+  check(solids.clear(-100, 1.6, -120, 100, 1.6, -120), 'but a straight street in town does not');
+}
+
+// ------------------------------------------------------------ hills and the sea
+{
+  console.log('hills and the sea');
+  const env = { solids, cars: [] };
+  // find a steep stretch of highway, and park on it facing uphill
+  let best = null;
+  for (const r of ROUTES) for (let i = 4; i < r.pts.length - 4; i++) {
+    const a = r.pts[i - 4], b = r.pts[i + 4], g = (b.y - a.y) / (b.s - a.s);
+    if (!best || Math.abs(g) > Math.abs(best.g)) best = { a, b, g };
+  }
+  const up = best.g > 0 ? [best.a, best.b] : [best.b, best.a];
+  const h = Math.atan2(up[1].x - up[0].x, up[1].z - up[0].z);
+  const mid = { x: (up[0].x + up[1].x) / 2, z: (up[0].z + up[1].z) / 2 };
+  // coasting uphill you slow sooner than on the flat
+  const coast = (x, z, hh) => {
+    const c = makeCar(1, 'sedan', x, z, hh);
+    c.v = 14;
+    let d = 0;
+    while (c.v > 0.5 && d < 300) { const px = c.x, pz = c.z; stepCar(c, { throttle: 0, steer: 0 }, 1 / 60, env); d += Math.hypot(c.x - px, c.z - pz); }
+    return d;
+  };
+  const dUp = coast(mid.x, mid.z, h), dFlat = coast(0, -40 + 2.6, Math.PI / 2);
+  check(dUp < dFlat * 0.75, `coasting up a hill you stop sooner (${dUp.toFixed(0)} m, against ${dFlat.toFixed(0)} m on the flat; a ${(Math.abs(best.g) * 100).toFixed(0)}% grade)`);
+  const d = makeCar(2, 'sedan', mid.x, mid.z, h);
+  const y0 = d.y;
+  for (let t = 0; t < 2; t += 1 / 60) stepCar(d, { throttle: 1, steer: 0 }, 1 / 60, env);
+  check(d.v > 8 && d.y > y0 + 1, `and drives on up it (${d.v.toFixed(1)} m/s, ${(d.y - y0).toFixed(1)} m up)`);
+  // flat out at the sea from the beach: the water's edge stops you
+  const e = makeCar(3, 'sports', -335, 120, -Math.PI / 2);
+  e.v = 30;
+  let hit = 0;
+  for (let t = 0; t < 4; t += 1 / 60) stepCar(e, { throttle: 1, steer: 0 }, 1 / 60, { ...env, onHit: (car, n) => { hit = Math.max(hit, n); } });
+  check(!inWater(e.x, e.z) && hit > 5, `you can't drive into the sea (stopped at ${e.x.toFixed(0)}, ${e.z.toFixed(0)})`);
 }
 
 if (failures) { console.log(`\n${failures} check(s) failed`); process.exit(1); }

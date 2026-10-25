@@ -6,7 +6,7 @@
 // you. Let one hold on to you and you're busted.
 
 import { WANTED } from '../shared/config.js';
-import { NODES, EDGES, lane, areaName } from '../shared/city.js';
+import { NODES, EDGES, lane, areaName, edgesNear } from '../shared/city.js';
 import { Driver } from './drivers.js';
 import { makePed, LOOK_COP, A } from './peds.js';
 import { DISPATCH } from '../shared/story.js';
@@ -111,8 +111,10 @@ export class Police {
       const pos = m.outPos(p);
       // a lane 70-120 m away, out of sight if we can
       let best = null, bs = -Infinity;
+      const near = edgesNear(pos.x, pos.z, 130);
+      if (!near.length) continue;
       for (let k = 0; k < 24; k++) {
-        const e = EDGES[Math.floor(m.rng() * EDGES.length)];
+        const e = near[Math.floor(m.rng() * near.length)];
         const from = m.rng() < 0.5 ? e.a : e.b;
         const L = lane(e.id, from);
         const t = 0.2 + m.rng() * 0.6;

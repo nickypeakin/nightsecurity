@@ -2,9 +2,10 @@
 // lights, brakes for whatever's in front), police cars (sirens, straight
 // through the lights, after whoever's wanted), getaway drivers, racers.
 // Every AI car follows a polyline of points built lane by lane from the
-// road graph, steering for a point a little way ahead.
+// road graph, steering for a point a little way ahead. Out on the highways
+// traffic goes faster, easing off only for the tighter bends.
 
-import { NODES, EDGES, lane, light, STOP, nodeAt } from '../shared/city.js';
+import { NODES, EDGES, lane, light, hasLights, STOP, nodeAt, edgesNear } from '../shared/city.js';
 import { stepCar, CAR_TYPES } from '../shared/car.js';
 
 const TAU = Math.PI * 2;
@@ -37,22 +38,39 @@ function lanePoints(edgeId, from, out) {
   const steps = Math.max(2, Math.round(L.len / 8));
   for (let k = 0; k <= steps; k++) {
     const t = k / steps;
-    const p = { x: L.x0 + (L.x1 - L.x0) * t, z: L.z0 + (L.z1 - L.z0) * t };
-    if (k === steps) p.stop = { node: L.to, axis: EDGES[edgeId].axis };
+    const p = { x: L.x0 + (L.x1 - L.x0) * t, z: L.z0 + (L.z1 - L.z0) * t, hw: L.hw };
+    if (k === steps && hasLights(L.to)) p.stop = { node: L.to, axis: EDGES[edgeId].axis };
     out.push(p);
   }
   return L;
 }
 
-// a curve through a junction from the end of lane A to the start of lane B
+// how sharply lane A turns into lane B (radians, 0 = straight on)
+const turnAngle = (A, B) => Math.atan2(Math.abs(A.dx * B.dz - A.dz * B.dx), A.dx * B.dx + A.dz * B.dz);
+
+// A curve through a junction from the end of lane A to the start of lane B.
+// Each point knows the bend's radius, so drivers know how fast to take it.
 function turnPoints(A, B, out) {
   const P = { x: A.x1, z: A.z1 }, Q = { x: B.x0, z: B.z0 };
-  if (A.dx === B.dx && A.dz === B.dz) { out.push({ x: (P.x + Q.x) / 2, z: (P.z + Q.z) / 2, junction: A.to }); return; }
+  const ang = turnAngle(A, B);
+  if (ang < 0.06) { out.push({ x: (P.x + Q.x) / 2, z: (P.z + Q.z) / 2, junction: A.to, hw: A.hw }); return; }
   // the corner where the two lane lines cross
-  const C = A.dx !== 0 ? { x: Q.x, z: P.z } : { x: P.x, z: Q.z };
-  for (let k = 1; k <= 5; k++) {
-    const t = k / 6, u = 1 - t;
-    out.push({ x: u * u * P.x + 2 * u * t * C.x + t * t * Q.x, z: u * u * P.z + 2 * u * t * C.z + t * t * Q.z, junction: A.to, turn: true });
+  const den = A.dx * B.dz - A.dz * B.dx;
+  let C = { x: (P.x + Q.x) / 2, z: (P.z + Q.z) / 2 };
+  if (Math.abs(den) > 1e-3) {
+    const s = ((Q.x - P.x) * B.dz - (Q.z - P.z) * B.dx) / den;
+    if (s > 0 && s < 40) C = { x: P.x + A.dx * s, z: P.z + A.dz * s };
+  }
+  // a highway's gentle bend is as wide as its stretches are long; a street
+  // corner is as tight as the turn itself
+  const len = Math.hypot(P.x - C.x, P.z - C.z) + Math.hypot(Q.x - C.x, Q.z - C.z);
+  const node = NODES[A.to];
+  const span = node.city ? len : Math.max(len, Math.min(EDGES[A.edge].len, EDGES[B.edge].len));
+  const bend = span / ang;
+  const n = ang > 0.7 ? 5 : 2;
+  for (let k = 1; k <= n; k++) {
+    const t = k / (n + 1), u = 1 - t;
+    out.push({ x: u * u * P.x + 2 * u * t * C.x + t * t * Q.x, z: u * u * P.z + 2 * u * t * C.z + t * t * Q.z, junction: A.to, bend, hw: A.hw });
   }
 }
 
@@ -66,6 +84,7 @@ export class Driver {
     this.pts = [];
     this.lane = null;          // the lane we're on (or heading for)
     this.cruise = 9 + m.rng() * 4;
+    this.fast = 19 + m.rng() * 7;          // on the highways
     this.stuckT = 0;
     this.hornT = 0;
     this.panicT = 0;
@@ -79,7 +98,9 @@ export class Driver {
   join() {
     const c = this.car;
     let best = null, bd = Infinity;
-    for (const e of EDGES) {
+    let near = edgesNear(c.x, c.z, 50);
+    if (!near.length) near = EDGES;
+    for (const e of near) {
       for (const from of [e.a, e.b]) {
         const L = lane(e.id, from);
         // distance from the car to the lane segment
@@ -145,14 +166,17 @@ export class Driver {
       }
       return best;
     }
-    // traffic: mostly straight on, sometimes turning
-    const straight = opts.find((eid) => EDGES[eid].axis === EDGES[L.edge].axis);
-    if (straight != null && this.m.rng() < 0.55) return straight;
-    return opts[Math.floor(this.m.rng() * opts.length)];
+    // traffic: mostly straight on, sometimes turning (and never back the
+    // way it came)
+    let straight = null, sa = Infinity;
+    for (const eid of opts) { const a = turnAngle(L, lane(eid, L.to)); if (a < sa) { sa = a; straight = eid; } }
+    if (opts.length === 1 || this.m.rng() < 0.55) return straight;
+    const turns = opts.filter((eid) => turnAngle(L, lane(eid, L.to)) < 2.6);
+    return turns.length ? turns[Math.floor(this.m.rng() * turns.length)] : straight;
   }
 
   extend() {
-    while (this.pts.length < 8) {
+    while (this.pts.length < 14) {
       const L = this.lane;
       const next = this.pickNext(L);
       const L2 = lane(next, L.to);
@@ -202,7 +226,8 @@ export class Driver {
       }
     }
 
-    let tx, tz, want = this.panicT > 0 || this.mode === 'flee' ? T.top * 0.8 : this.mode === 'chase' || this.mode === 'race' ? T.top * 0.92 : this.cruise;
+    const pace = this.pts[0] && this.pts[0].hw ? Math.max(this.cruise, this.fast) : this.cruise;
+    let tx, tz, want = this.panicT > 0 || this.mode === 'flee' ? T.top * 0.8 : this.mode === 'chase' || this.mode === 'race' ? T.top * 0.92 : pace;
     // pulling up by someone on foot (the police, to get out and grab them)
     if (this.mode === 'chase' && this.approach && this.target) want = Math.min(want, Math.max(2, this.stopSpeed(Math.hypot(this.target.x - c.x, this.target.z - c.z) - 9)));
     if (this.mode === 'race' && this.rubber) want *= this.rubber;
@@ -228,9 +253,14 @@ export class Driver {
       // slow for corners, soon enough to make them
       let ahead = 0;
       const window = Math.max(18, c.v * c.v / 14 + 6);
+      const grip = this.mode === 'cruise' || this.mode === 'route' ? 5.5 : 9.5;
       for (let k = 0; k < this.pts.length && ahead < window; k++) {
         ahead += Math.hypot(this.pts[k].x - (k ? this.pts[k - 1].x : c.x), this.pts[k].z - (k ? this.pts[k - 1].z : c.z));
-        if (this.pts[k].turn) { const corner = this.mode === 'cruise' ? 7 : 11; want = Math.min(want, Math.max(corner, Math.sqrt(corner * corner + 2 * 7 * Math.max(0, ahead - 4)))); break; }
+        const b = this.pts[k].bend;
+        if (b) {
+          const corner = Math.max(6, Math.sqrt(grip * b));
+          if (corner < want) want = Math.min(want, Math.sqrt(corner * corner + 2 * 7 * Math.max(0, ahead - 4)));
+        }
       }
       // red lights
       if (!ignore) {
@@ -320,7 +350,7 @@ export class Driver {
     for (const side of [-1, 1]) {
       const a = c.h - side * 0.45;
       const dx = Math.sin(a), dz = Math.cos(a);
-      const h = m.solids.ray(c.x, 0.8, c.z, dx, 0, dz, 9);
+      const h = m.solids.ray(c.x, (c.y || 0) + 0.8, c.z, dx, 0, dz, 9);
       if (h) steer -= side * (1 - h.t / 9) * 0.9;
     }
     return steer;

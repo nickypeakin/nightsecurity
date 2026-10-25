@@ -1,21 +1,27 @@
-// The title screen's background: Kingsgate late on a sunny afternoon. The
-// camera drifts over the downtown towers, down a long street, past the
-// harbour cranes and the fence round where the mall used to be.
+// The title screen's background: Kingsgate and its island late on a sunny
+// afternoon. The camera drifts over the downtown towers, in from the sea
+// with the hills behind, past the sign on the hill, along Pelican Beach,
+// down a long street, round Mount Harlow and past the harbour cranes.
 
 import * as THREE from 'three';
+import { heightAt, SIGN, SUMMIT, COUNTRY } from '../shared/world.js';
 
+const G = (x, z, up) => [x, heightAt(x, z) + up, z];
+const P = COUNTRY.pier;
 const SHOTS = [
   { from: [-60, 60, 110], to: [-20, 52, 80], look: [20, 10, -20], dur: 16 },
+  { from: [90, 120, 640], to: [40, 105, 560], look: [0, 30, -500], dur: 16 },
+  { from: G(SIGN.x - 70, SIGN.z + 90, 22), to: G(SIGN.x - 20, SIGN.z + 80, 20), look: G(SIGN.x, SIGN.z, 6), dur: 14 },
+  { from: [P.x0 - 40, P.y + 14, P.z1 + 60], to: [P.x0 - 10, P.y + 10, P.z1 + 120], look: [P.x1 + 40, P.y, P.z0 - 20], dur: 14 },
   { from: [120 - 2.6, 1.6, 150], to: [120 - 2.6, 1.8, 90], look: [118, 3, 0], dur: 14 },
+  { from: [SUMMIT.x - 520, SUMMIT.y + 40, SUMMIT.z + 380], to: [SUMMIT.x - 460, SUMMIT.y + 30, SUMMIT.z + 300], look: [SUMMIT.x, SUMMIT.y - 40, SUMMIT.z], dur: 15 },
   { from: [-30, 9, 190], to: [10, 11, 196], look: [-10, 12, 236], dur: 14 },
-  { from: [-40, 2.2, 60], to: [-46, 2.6, 52], look: [-80, 2, 80], dur: 14 },
-  { from: [30, 3, -30], to: [10, 4, -34], look: [0, 10, -60], dur: 14 },
 ];
 
 export class Attract {
   constructor(world) {
     this.world = world;
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1400);
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.12, 2700);
     this.t = 0;
     this.i = 0;
     this.hour = 17.3;

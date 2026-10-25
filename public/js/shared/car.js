@@ -1,5 +1,7 @@
 // Cars: the models on Kingsgate's streets and how they drive. The physics
-// is arcade, flat and two-dimensional: a bicycle model for steering, a
+// is arcade and two-dimensional, the car keeping to the ground (hills slow
+// you going up and speed you coming down, and the sea's edge stops you like
+// a wall): a bicycle model for steering, a
 // little sideways slip that the tyres scrub away (much less of it with the
 // handbrake on, so you can slide round a corner), collisions that bounce
 // and spin you, and damage. The same code drives your own car on your
@@ -8,6 +10,7 @@
 // Heading h: forward is (sin h, cos h); right is (-cos h, sin h).
 
 import { carVsBox, carVsCar } from './collide.js';
+import { groundY, inWater } from './city.js';
 
 // top: m/s; accel/brake: m/s^2; grip: how fast sideways slip goes; steer:
 // most wheel lock (radians); wb: wheelbase; hp: how much it takes
@@ -30,6 +33,7 @@ export function makeCar(id, type, x, z, h, paint = 0) {
   const T = CAR_TYPES[type];
   return {
     id, type, x, z, h, paint,
+    y: groundY(x, z),
     hl: T.len / 2, hw: T.wid / 2, ht: T.ht,
     v: 0,      // forward speed
     s: 0,      // sideways slip (to the right)
@@ -59,6 +63,11 @@ export function stepCar(c, inp, dt, env) {
   if (thr > 0.05) a = c.v < -0.4 ? T.brake * thr : T.accel * thr * Math.max(0, 1 - Math.max(0, c.v) / T.top);
   else if (thr < -0.05) a = c.v > 0.4 ? -T.brake * -thr : -T.accel * 0.55 * -thr * Math.max(0, 1 - Math.max(0, -c.v) / (T.top * 0.3));
   else a = -Math.sign(c.v) * Math.min(spd / dt, 1.6);
+  // uphill or down (a parked car stays put)
+  const sh = Math.sin(c.h), ch = Math.cos(c.h), r = c.hl * 0.8;
+  const slope = (groundY(c.x + sh * r, c.z + ch * r) - groundY(c.x - sh * r, c.z - ch * r)) / (2 * r);
+  const pull = -9.8 * Math.max(-0.6, Math.min(0.6, slope)) * 0.75;
+  if (Math.abs(thr) > 0.05 || Math.abs(c.v) > 0.5 || Math.abs(pull) > 1.6) a += pull;
   if (inp.handbrake) a += -Math.sign(c.v) * Math.min(Math.abs(c.v + a * dt) / dt, 6.5);
   c.v += a * dt;
   c.v -= c.v * spd * 0.0007 * dt * 10;
@@ -76,9 +85,18 @@ export function stepCar(c, inp, dt, env) {
   c.h += c.w * dt;
 
   const s = Math.sin(c.h), co = Math.cos(c.h);
+  const px = c.x, pz = c.z;
   c.x += (s * c.v - co * c.s) * dt;
   c.z += (co * c.v + s * c.s) * dt;
+  // the water's edge: as good as a wall
+  if (inWater(c.x + s * c.hl * Math.sign(c.v || 1), c.z + co * c.hl * Math.sign(c.v || 1))) {
+    const hit = Math.abs(c.v);
+    c.x = px; c.z = pz;
+    c.v *= -0.2; c.s *= 0.3; c.w *= 0.3;
+    if (env && env.onHit && hit > 3) env.onHit(c, hit * 0.6, null);
+  }
   if (env) collide(c, env);
+  c.y = groundY(c.x, c.z);
 }
 
 // world velocity of a car
@@ -98,7 +116,7 @@ function collide(c, env) {
   const near = env.solids.near(c.x, c.z, c.hl + 2, env._set || (env._set = new Set()));
   for (let pass = 0; pass < 2; pass++) {
     for (const b of near) {
-      if (b.small || b.y0 > 1.2) continue;
+      if (b.small || b.y0 > (c.y || 0) + 1.2 || b.y1 < (c.y || 0) + 0.25) continue;
       const hit = carVsBox(c, b);
       if (hit) respond(c, hit, null, env);
     }

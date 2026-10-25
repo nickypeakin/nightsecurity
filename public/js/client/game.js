@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { PLAYER_R, WALK, JOG, SPRINT, JUMP_V, GRAVITY, REACH, WEAPONS, TICK, PRICES, hourAt, clockText } from '../shared/config.js';
-import { PLACES, groundY, areaName } from '../shared/city.js';
+import { PLACES, groundY, areaName, inWater } from '../shared/city.js';
 import { INTERIOR, INTERIORS, interiorAt, worldSolids } from '../shared/interiors.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS } from '../shared/car.js';
 import { circleVsCar, rayCar, rayPerson } from '../shared/collide.js';
@@ -79,7 +79,7 @@ export class Game {
     this.roster = start.roster;
     this.myIdx = Math.max(0, this.roster.findIndex((r) => r.id === this.me));
     this.myColor = this.roster[this.myIdx]?.color ?? 0;
-    this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 1100);
+    this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.12, 2700);
     this.solids = worldSolids();
     this.fx = new Fx(world);
     this.radar = new Radar($('radar'), $('mapCanvas'));
@@ -355,14 +355,14 @@ export class Game {
         break;
       }
       case 'boom': F.explosion(m.x, m.z); sound.explosion({ x: m.x, z: m.z }); { const me2 = this.pos(); const d = Math.hypot(m.x - me2.x, m.z - me2.z); this.shake = Math.min(1.5, this.shake + Math.max(0, 1.4 - d / 40)); } break;
-      case 'crash': sound.crash({ x: m.x, z: m.z }, m.n); F.puff(m.x, 0.8, m.z, [0.5, 0.48, 0.45]); break;
+      case 'crash': sound.crash({ x: m.x, z: m.z }, m.n); F.puff(m.x, groundY(m.x, m.z) + 0.8, m.z, [0.5, 0.48, 0.45]); break;
       case 'thud': sound.thud({ x: m.x, z: m.z }, m.n); break;
       case 'punch': { if (m.id !== me) { const O = this.others.get(m.id); if (O) O.view.rig.punch(); } const p = this.others.get(m.id)?.view || this.myView; sound.punch({ x: p.x, z: p.z }, m.hit); break; }
-      case 'pickup': if (m.id === me) { sound.jingle(m.kind === 'cash' ? 'cash' : 'pickup'); } F.sparkle(m.x, 1, m.z); break;
+      case 'pickup': if (m.id === me) { sound.jingle(m.kind === 'cash' ? 'cash' : 'pickup'); } F.sparkle(m.x, groundY(m.x, m.z) + 1, m.z); break;
       case 'wanted': if (m.id === me && m.n > 0) sound.jingle('wanted'); break;
       case 'alarm': { const C = this.cars.get(m.car); if (C) sound.alarm({ x: C.view.x, z: C.view.z }); break; }
       case 'horn': { const C = this.cars.get(m.car); if (C && !(this.myCar && this.myCar.id === m.car)) sound.horn({ x: C.view.x, z: C.view.z }, 0.5); break; }
-      case 'smash': F.puff(m.x, 0.6, m.z, [0.45, 0.35, 0.2]); F.explosion(m.x, m.z); sound.crash({ x: m.x, z: m.z }, 0.8); break;
+      case 'smash': F.puff(m.x, groundY(m.x, m.z) + 0.6, m.z, [0.45, 0.35, 0.2]); F.explosion(m.x, m.z); sound.crash({ x: m.x, z: m.z }, 0.8); break;
       case 'grab': if (m.id === me) { sound.crash(null, 0.3); this.shake = 1; } break;
       case 'collapse': for (const P of this.peds.values()) if (P.look === LOOK_MQ || P.look === LOOK_MQ2) this.fx.puff(P.view.x, 1, P.view.z, [0.9, 0.88, 0.85]); break;
       case 'missionStart': case 'passed': case 'failed': break;
@@ -621,6 +621,7 @@ export class Game {
       p.x += p.kx * dt; p.z += p.kz * dt;
       p.kx *= Math.exp(-3 * dt); p.kz *= Math.exp(-3 * dt);
     }
+    const ox = p.x, oz = p.z;
     p.x += mx * speed * dt;
     p.z += mz * speed * dt;
     p.speed += (speed - p.speed) * Math.min(1, dt * 10);
@@ -634,13 +635,14 @@ export class Game {
     p.vy -= GRAVITY * dt;
     p.y = Math.max(0, p.y + p.vy * dt);
     if (p.y <= 0) p.vy = 0;
-    // walls, cars
-    this.solids.resolveCircle(p, PLAYER_R, p.y, true);
+    // walls, cars, the water's edge
+    this.solids.resolveCircle(p, PLAYER_R, ground + p.y, true);
     for (const c of this.nearCars(p.x, p.z, 5)) {
       const h = circleVsCar(p.x, p.z, PLAYER_R, c);
       if (h && p.y < 1.2) { p.x += h.nx * h.depth; p.z += h.nz * h.depth; }
     }
-    p.ground = ground;
+    if (inWater(p.x, p.z) && !inWater(ox, oz)) { p.x = ox; p.z = oz; }
+    p.ground = groundY(p.x, p.z);
     p.anim = p.y > 0.05 ? AN.jump : this.aim && this.w ? AN.aim : speed > JOG + 0.5 ? AN.run : speed > WALK + 0.5 ? AN.run : speed > 0 ? AN.walk : AN.idle;
     // footsteps
     this.stepAcc += speed * dt;
@@ -700,7 +702,7 @@ export class Game {
     // the muzzle: in front of you at chest height (or out of the car window)
     const src = this.pos();
     const h = Math.atan2(d.x, d.z);
-    const mz = new THREE.Vector3(src.x + Math.sin(h) * 0.5 + Math.cos(h) * -0.22, (this.ride ? 1.3 : 1.42 + this.p.y + (this.p.ground || 0)), src.z + Math.cos(h) * 0.5 - Math.sin(h) * -0.22);
+    const mz = new THREE.Vector3(src.x + Math.sin(h) * 0.5 + Math.cos(h) * -0.22, (this.ride ? 1.3 + groundY(src.x, src.z) : 1.42 + this.p.y + (this.p.ground || 0)), src.z + Math.cos(h) * 0.5 - Math.sin(h) * -0.22);
     const dir = aimPt.clone().sub(mz).normalize();
     this.link.send({ t: 'fire', w: this.w, o: [r2(mz.x), r2(mz.y), r2(mz.z)], d: [r3(dir.x), r3(dir.y), r3(dir.z)] });
     this.fx.muzzle(mz.x, mz.y, mz.z, dir.x, dir.z);
@@ -720,15 +722,15 @@ export class Game {
       if (id === skip) continue;
       const v = C.view;
       const T = CAR_TYPES[C.type];
-      const t = rayCar(o.x, o.y, o.z, d.x, d.y, d.z, { x: v.x, z: v.z, h: v.h, hl: T.len / 2, hw: T.wid / 2, ht: T.ht }, best);
+      const t = rayCar(o.x, o.y, o.z, d.x, d.y, d.z, { x: v.x, z: v.z, y: groundY(v.x, v.z), h: v.h, hl: T.len / 2, hw: T.wid / 2, ht: T.ht }, best);
       if (t >= 0 && t < best) best = t;
     }
     for (const P of this.peds.values()) {
-      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: P.view.x, z: P.view.z, y: 0 }, best);
+      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: P.view.x, z: P.view.z, y: groundY(P.view.x, P.view.z) }, best);
       if (t > 1.5 && t < best) best = t;
     }
     for (const O of this.others.values()) {
-      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: O.view.x, z: O.view.z, y: 0 }, best);
+      const t = rayPerson(o.x, o.y, o.z, d.x, d.y, d.z, { x: O.view.x, z: O.view.z, y: groundY(O.view.x, O.view.z) }, best);
       if (t > 1.5 && t < best) best = t;
     }
     return best;
@@ -749,7 +751,9 @@ export class Game {
   // ------------------------------------------------------------ drawing
   updateViews(dt) {
     const rt = this.renderT();
-    const me = this.pos();
+    // (indoors, the street's measured from the door, so what's out there
+    // keeps moving on the radar)
+    const me = this.room ? INTERIOR[this.room].door : this.pos();
     const t = this.T;
     // cars
     for (const [id, C] of this.cars) {
@@ -841,10 +845,15 @@ export class Game {
       for (const P of this.peds.values()) P.view.root.visible = false;
       for (const d of this.drivers.values()) d.root.visible = false;
       for (const m of this.pickups.values()) m.visible = false;
-    } else for (const m of this.pickups.values()) m.visible = true;
-    // pickups and markers turn and bob
-    for (const m of this.pickups.values()) { const s = m.userData.spin; if (s) { s.rotation.y += dt * 2; s.position.y = 1 + Math.sin(t * 3) * 0.08; } }
-    for (const m of this.markers.values()) { m.visible = this.intro < 0; const s = m.userData.spin; if (s) s.rotation.y += dt * 0.5; }
+    } else for (const m of this.pickups.values()) m.visible = Math.abs(m.position.x - me.x) < 160 && Math.abs(m.position.z - me.z) < 160;
+    // pickups and markers turn and bob (the near ones)
+    for (const m of this.pickups.values()) { const s = m.userData.spin; if (s && m.visible) { s.rotation.y += dt * 2; s.position.y = 1 + Math.sin(t * 3) * 0.08; } }
+    const here = this.pos();
+    for (const m of this.markers.values()) {
+      m.visible = this.intro < 0 && Math.abs(m.position.x - here.x) < 220 && Math.abs(m.position.z - here.z) < 220;
+      const s = m.userData.spin;
+      if (s && m.visible) s.rotation.y += dt * 0.5;
+    }
     this.updateArrows();
   }
 
@@ -858,14 +867,15 @@ export class Game {
     const px = x + Math.cos(h) * lx + Math.sin(h) * back, pz = z - Math.sin(h) * lx + Math.cos(h) * back;
     v.x = v.tx = px; v.z = v.tz = pz; v.h = v.th = h; v.fresh = false;
     v.anim = 0;
-    v.update(dt, { pose: seat === 0 ? 'drive' : 'sit', y: (type === 'van' ? 0.55 : type === 'sports' ? 0.12 : 0.28), smooth: 1000 });
+    const gy = groundY(x, z);
+    v.update(dt, { pose: seat === 0 ? 'drive' : 'sit', y: gy + (type === 'van' ? 0.55 : type === 'sports' ? 0.12 : 0.28), smooth: 1000 });
     // keep their head under the roof, however tall they are (the low cars
     // sit you lower)
     const head = v.rig.skull || v.rig.head;
     if (head) {
       v.root.updateMatrixWorld(true);
       const hy = head.getWorldPosition(SEAT_TMP).y;
-      const roof = T.ht - 0.2;
+      const roof = gy + T.ht - 0.2;
       if (hy > roof) v.root.position.y -= Math.min(hy - roof, 0.5);
     }
   }
@@ -874,8 +884,8 @@ export class Game {
   updateArrows() {
     const want = [];
     for (const b of this.mission.blips || []) {
-      if (b.car != null) { const C = this.cars.get(b.car); if (C) want.push({ x: C.view.x, z: C.view.z, y: CAR_TYPES[C.type].ht + 1.6, k: b.k }); }
-      if (b.ped != null) { const P = this.peds.get(b.ped); if (P) want.push({ x: P.view.x, z: P.view.z, y: 2.6, k: b.k }); }
+      if (b.car != null) { const C = this.cars.get(b.car); if (C) want.push({ x: C.view.x, z: C.view.z, y: groundY(C.view.x, C.view.z) + CAR_TYPES[C.type].ht + 1.6, k: b.k }); }
+      if (b.ped != null) { const P = this.peds.get(b.ped); if (P) want.push({ x: P.view.x, z: P.view.z, y: groundY(P.view.x, P.view.z) + 2.6, k: b.k }); }
     }
     while (this.arrows.length < want.length) {
       const m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 4), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
@@ -956,7 +966,7 @@ export class Game {
       const spd = this.myCar ? Math.abs(this.myCar.c.v) : 8;
       if (this.camLook > 1.2 && (spd > 2 || this.ride)) this.camYaw = lerpA(this.camYaw, behind, Math.min(1, dt * (1.5 + spd * 0.08)));
       if (this.camLook > 1.2) this.camPitch += (0.22 - this.camPitch) * Math.min(1, dt * 2);
-      target = new THREE.Vector3(c.x, T.ht + 0.6, c.z);
+      target = new THREE.Vector3(c.x, groundY(c.x, c.z) + T.ht + 0.6, c.z);
       dist = 5.2 + T.len * 0.55 + Math.min(14, spd) * 0.12;
       fov = 70 + Math.min(10, spd * 0.25);
     } else {
@@ -980,7 +990,7 @@ export class Game {
     const use = hit ? Math.max(0.6, hit.t - 0.3) : L;
     this.camDist += (use - this.camDist) * Math.min(1, dt * (use < this.camDist ? 30 : 6));
     cam.position.copy(target).addScaledVector(d, this.camDist);
-    cam.position.y = Math.max(cam.position.y, 0.4);
+    cam.position.y = Math.max(cam.position.y, groundY(cam.position.x, cam.position.z) + 0.4);
     // shake
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 2.5);
@@ -997,8 +1007,9 @@ export class Game {
     if (this.myCar || this.ride) {
       const c = me;
       H.intensity = 15 * this.world.sunState.night;
-      H.position.set(c.x + Math.sin(c.h) * 2, 0.9, c.z + Math.cos(c.h) * 2);
-      H.target.position.set(c.x + Math.sin(c.h) * 14, 0, c.z + Math.cos(c.h) * 14);
+      const hx = c.x + Math.sin(c.h) * 2, hz = c.z + Math.cos(c.h) * 2, tx = c.x + Math.sin(c.h) * 14, tz = c.z + Math.cos(c.h) * 14;
+      H.position.set(hx, groundY(hx, hz) + 0.9, hz);
+      H.target.position.set(tx, groundY(tx, tz), tz);
     } else H.intensity = 0;
   }
 
@@ -1062,7 +1073,7 @@ export class Game {
     }
     const spd = this.myCar ? Math.abs(this.myCar.c.v) : 0;
     this.radar.draw({ x: me.x, z: me.z, yaw: this.camYaw, h: me.h ?? this.p.h, blips, players, police, range: 85 + spd * 2, t: this.T });
-    if (this.mapOpen) this.radar.drawMap({ x: me.x, z: me.z, h: me.h ?? this.p.h, blips, players });
+    if (this.mapOpen) this.radar.drawMap({ blips, players });
     if (this.shopOpen) {
       if (!this.atShop()) this.openShop(false);
       else this.hud.shop(true, M.money, M.ammo, M.armor, this.shopMsg || '');
@@ -1101,9 +1112,15 @@ export class Game {
   }
 
   // ------------------------------------------------------------ panels
+  // the map: the pointer's free while it's open, to drag it about
   toggleMap() {
     this.mapOpen = !this.mapOpen;
     $('mapScreen').hidden = !this.mapOpen;
+    if (this.mapOpen) {
+      const me = this.room ? INTERIOR[this.room].door : this.pos();
+      this.radar.openMap(me.x, me.z);
+      this.input.unlock();
+    } else this.input.lock();
   }
 
   openShop(open) {
@@ -1114,6 +1131,15 @@ export class Game {
   }
 
   onShopKey(e) {
+    if (this.mapOpen) {
+      const R = this.radar;
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') R.zoomAt(1.3);
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') R.zoomAt(0.77);
+      const pan = { ArrowLeft: [-80, 0], ArrowRight: [80, 0], ArrowUp: [0, -80], ArrowDown: [0, 80], KeyA: [-80, 0], KeyD: [80, 0], KeyW: [0, -80], KeyS: [0, 80] }[e.code];
+      if (pan && !this.input.locked) R.pan(pan[0] * (R.dpr || 1), pan[1] * (R.dpr || 1));
+      if ((e.code === 'KeyM' || e.code === 'Escape') && !this.input.locked) { e.preventDefault(); this.toggleMap(); }
+      return;
+    }
     if (!this.shopOpen) return;
     const k = { Digit1: 'pistol', Digit2: 'smg', Digit3: 'shotgun', Digit4: 'armor' }[e.code];
     if (k) this.link.send({ t: 'buy', item: k });

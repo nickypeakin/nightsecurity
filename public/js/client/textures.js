@@ -109,6 +109,30 @@ export const grass = () => cached('grass', () => {
   return toTexture(c);
 });
 
+// the land's fine detail, grey (the ground's colour is in the mesh)
+export const terrainDetail = () => cached('terrain', () => {
+  const S = 256, rng = makeRng('terrain');
+  const [c, x] = canvas(S, S, 1);
+  x.fillStyle = '#d8d8d8';
+  x.fillRect(0, 0, S, S);
+  for (let k = 0; k < 40; k++) blotch(x, rng() * S, rng() * S, 14 + rng() * 40, rng() < 0.5 ? 'rgba(150,150,150,A)' : 'rgba(255,255,255,A)', 0.35);
+  for (let k = 0; k < 2400; k++) { const v = 150 + rng() * 105 | 0; x.fillStyle = `rgba(${v},${v},${v},0.5)`; x.fillRect(rng() * S, rng() * S, 1 + rng() * 2, 1 + rng() * 2); }
+  grain(x, 30, rng);
+  return toTexture(c);
+});
+
+// one big white letter (for the sign on the hill)
+export const letter = (ch) => cached(`letter:${ch}`, () => {
+  const [c, x] = canvas(128, 160, 1);
+  x.clearRect(0, 0, 128, 160);
+  x.fillStyle = '#f4f2ec';
+  x.font = 'bold 168px Anton, Impact, "Arial Black", sans-serif';
+  x.textAlign = 'center';
+  x.textBaseline = 'alphabetic';
+  x.fillText(ch, 64, 152);
+  return toTexture(c, { repeat: false });
+});
+
 export const dirt = () => cached('dirt', () => {
   const S = 256, rng = makeRng('dirt');
   const [c, x] = canvas(S, S, 1);
@@ -232,6 +256,8 @@ const FACADES = {
   hospital: { cols: 8, rows: 7, bay: 3.0, floor: 3.4, wall: '#d8d8d0', win: '#1a2a34', frame: '#9aa0a0', lit: 0.55, band: true },
   station: { cols: 6, rows: 3, bay: 3.2, floor: 3.6, wall: '#5a4a3a', win: '#14181c', frame: '#c8c0b0', lit: 0.6, bricks: true },
   civic: { cols: 6, rows: 4, bay: 3.6, floor: 4.6, wall: '#c8bea8', win: '#1a1c20', frame: '#988e7a', lit: 0.25, arch: true },
+  villa: { cols: 6, rows: 2, bay: 3.6, floor: 3.75, wall: '#ece6d8', win: '#1a2a36', frame: '#d0c8b8', lit: 0.5, glass: true },
+  trailer: { cols: 4, rows: 1, bay: 3.0, floor: 3.2, wall: '#c8c4b4', win: '#1a1c20', frame: '#8a8a84', lit: 0.4, ribbed: true },
 };
 export const facadeSize = (kind) => { const F = FACADES[kind] || FACADES.office; return [F.cols * F.bay, F.rows * F.floor]; };
 
@@ -436,27 +462,6 @@ export const sky = () => cached('sky', () => {
   return toTexture(c, { repeat: false });
 });
 
-// far hills with a few lights, wrapped all round the horizon
-export const skyline = () => cached('skyline', () => {
-  const W = 2048, H = 256, rng = makeRng('skyline');
-  const [c, x] = canvas(W, H, 1);
-  x.clearRect(0, 0, W, H);
-  x.fillStyle = '#05070c';
-  x.beginPath();
-  x.moveTo(0, H);
-  for (let px = 0; px <= W; px += 16) x.lineTo(px, H * 0.55 - Math.sin(px * 0.004) * 30 - Math.sin(px * 0.017) * 12 - rng() * 6);
-  x.lineTo(W, H);
-  x.fill();
-  for (let k = 0; k < 220; k++) {
-    const px = rng() * W, py = H * 0.62 + rng() * H * 0.35;
-    x.fillStyle = rng() < 0.7 ? `rgba(255,190,110,${0.4 + rng() * 0.5})` : `rgba(200,220,255,${0.3 + rng() * 0.5})`;
-    x.fillRect(px, py, 1.5, 1.5);
-  }
-  const t = toTexture(c);
-  t.wrapT = THREE.ClampToEdgeWrapping;
-  return t;
-});
-
 // -------------------------------------------------------- HUD and pickups --
 // the city map, drawn from above (for the radar and the pause map)
 export function cityMap({ BLOCKS, BUILDINGS, LINES, ROAD, HARBOR }, size = 1024) {
@@ -464,11 +469,10 @@ export function cityMap({ BLOCKS, BUILDINGS, LINES, ROAD, HARBOR }, size = 1024)
     const [c, x] = canvas(size, size, 1);
     const k = size / 480, o = 240;
     const P = (v) => (v + o) * k;
-    x.fillStyle = '#1e2a1c';
-    x.fillRect(0, 0, size, size);
-    // water
-    x.fillStyle = '#0e2238';
-    x.fillRect(0, P(HARBOR.z1), size, size - P(HARBOR.z1));
+    // (just the city: the island round it is the radar's own picture)
+    x.clearRect(0, 0, size, size);
+    x.fillStyle = '#34383c';
+    x.fillRect(P(-209), P(-209), 418 * k, 418 * k);
     x.fillStyle = '#4a4c50';
     x.fillRect(P(HARBOR.x0), P(HARBOR.z0), (HARBOR.x1 - HARBOR.x0) * k, (HARBOR.z1 - HARBOR.z0) * k);
     for (const b of BLOCKS) {

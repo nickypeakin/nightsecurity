@@ -4,6 +4,8 @@
 // jingles when a job's done, and a late-night radio station in every car.
 // (Built on Cinder Peak's sound engine.)
 
+import { groundY } from '../shared/city.js';
+
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 class Sound {
@@ -106,7 +108,9 @@ class Sound {
     this.place(p, x, y, z);
     return p;
   }
+  // (y: height over the ground there)
   place(p, x, y, z) {
+    y += groundY(x, z);
     if (p.positionX) {
       const t = this.now;
       p.positionX.setTargetAtTime(x, t, 0.03); p.positionY.setTargetAtTime(y, t, 0.03); p.positionZ.setTargetAtTime(z, t, 0.03);
@@ -116,7 +120,7 @@ class Sound {
   out(pos, ref = 2, roll = 1.1) {
     if (!pos) return this.sfx;
     if (this.lx != null && Math.hypot(pos.x - this.lx, pos.z - this.lz) > 160) return null;
-    const p = this.panner(pos.x, pos.y ?? 1.2, pos.z, ref, roll);
+    const p = this.panner(pos.x, pos.y != null ? pos.y - groundY(pos.x, pos.z) : 1.2, pos.z, ref, roll);
     p.connect(this.sfx);
     return p;
   }

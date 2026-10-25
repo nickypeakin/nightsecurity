@@ -6,10 +6,16 @@
 // north, warehouses and the harbour to the south). Where Kingsgate Mall
 // stood there's a fenced-off lot of rubble.
 //
+// The city is on the south coast of an island (shared/world.js): highways
+// leave the ring road for the rest of it, and join the road graph here as
+// chains of junctions a couple of dozen metres apart, so traffic, the
+// police and the routes all just work out there too.
+//
 // x runs east, z runs south (north is -z). A heading h faces (sin h, cos h).
 
 import { makeRng } from './rng.js';
 import { Solids } from './collide.js';
+import { ROUTES, JUNCTIONS, COUNTRY, FLORA, CITY_BOX, ROOMS_BOX, SEA_Y, LAKE, heightAt, countryName, waterY } from './world.js';
 
 export const LINES = [-200, -120, -40, 40, 120, 200];
 export const ROAD = 6;            // asphalt half-width
@@ -18,7 +24,6 @@ export const PARK = 4.9;          // parked cars sit this far from the middle
 export const CURB = 9;            // sidewalk edge: blocks start here
 export const STOP = 10;           // stop lines this far from a junction's middle
 export const EDGE = 209;          // the ring road's outer sidewalk ends here
-export const BOUND = 238;         // the edge of the world
 export const HARBOR = { x0: -209, x1: 209, z0: 209, z1: 236 };
 export const SIDEWALK_Y = 0.12;
 
@@ -26,8 +31,9 @@ const N = LINES.length;
 
 // ---------------------------------------------------------------- roads --
 // junctions, numbered row by row from the north-west
+// (`stop`: how far short of the middle traffic stops)
 export const NODES = [];
-for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) NODES.push({ id: j * N + i, i, j, x: LINES[i], z: LINES[j], edges: [] });
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) NODES.push({ id: j * N + i, i, j, x: LINES[i], z: LINES[j], y: 0, edges: [], city: true, stop: STOP });
 export const nodeAt = (i, j) => (i < 0 || j < 0 || i >= N || j >= N ? null : NODES[j * N + i]);
 
 // stretches of road between neighbouring junctions
@@ -46,20 +52,106 @@ for (let j = 0; j < N; j++) {
   }
 }
 
+export const CITY_EDGES = EDGES.length;
+
+// The highways: each route's curve, a junction every couple of dozen metres
+// (shared where routes meet, or the ring road's own junction where one
+// leaves town).
+export const EXITS = [];         // { node, dx, dz }: where highways leave the ring road
+{
+  const named = new Map();
+  const nodeFor = (pt, route) => {
+    const city = NODES.find((n) => n.city && Math.abs(n.x - pt[0]) < 0.5 && Math.abs(n.z - pt[1]) < 0.5);
+    if (city) return city;
+    const key = Object.keys(JUNCTIONS).find((k) => JUNCTIONS[k] === pt);
+    if (!named.has(key)) {
+      const r = route.pts.find((q) => Math.abs(q.x - pt[0]) < 0.5 && Math.abs(q.z - pt[1]) < 0.5) || route.pts[0];
+      const n = { id: NODES.length, x: pt[0], z: pt[1], y: r.y, edges: [], hw: true, stop: 6, name: key };
+      NODES.push(n);
+      named.set(key, n);
+    }
+    return named.get(key);
+  };
+  const join = (a, b, route) => {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const e = { id: EDGES.length, a: a.id, b: b.id, axis: Math.abs(dx) > Math.abs(dz) ? 'x' : 'z', len: Math.hypot(dx, dz), hw: route.id };
+    EDGES.push(e);
+    a.edges.push(e.id);
+    b.edges.push(e.id);
+  };
+  for (const r of ROUTES) {
+    const A = nodeFor(r.from, r), B = nodeFor(r.to, r);
+    const n = Math.max(1, Math.round(r.len / 24));
+    let prev = A, first = null;
+    for (let k = 1; k < n; k++) {
+      const s = (r.len * k) / n;
+      // the route's point nearest that far along
+      let lo = 0, hi = r.pts.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (r.pts[m].s <= s) lo = m; else hi = m; }
+      const p = r.pts[s - r.pts[lo].s < r.pts[hi].s - s ? lo : hi];
+      const q = { id: NODES.length, x: p.x, z: p.z, y: p.y, edges: [], hw: true, stop: 2, route: r.id };
+      NODES.push(q);
+      join(prev, q, r);
+      first ||= q;
+      prev = q;
+    }
+    join(prev, B, r);
+    for (const [end, next] of [[A, first || B], [B, prev]]) {
+      if (!end.city) continue;
+      const l = Math.hypot(next.x - end.x, next.z - end.z);
+      EXITS.push({ node: end.id, dx: Math.round((next.x - end.x) / l), dz: Math.round((next.z - end.z) / l) });
+    }
+  }
+}
+
+// edges by 64 m squares, to find the ones near a spot quickly
+const ECELL = 64;
+const EGRID = new Map();
+for (const e of EDGES) {
+  const A = NODES[e.a], B = NODES[e.b];
+  for (let i = Math.floor((Math.min(A.x, B.x) - ROAD) / ECELL); i <= Math.floor((Math.max(A.x, B.x) + ROAD) / ECELL); i++) {
+    for (let j = Math.floor((Math.min(A.z, B.z) - ROAD) / ECELL); j <= Math.floor((Math.max(A.z, B.z) + ROAD) / ECELL); j++) {
+      const k = i * 4099 + j;
+      if (!EGRID.has(k)) EGRID.set(k, []);
+      EGRID.get(k).push(e);
+    }
+  }
+}
+// every edge within about r of (x, z)
+export function edgesNear(x, z, r, out = []) {
+  out.length = 0;
+  const seen = new Set();
+  for (let i = Math.floor((x - r) / ECELL); i <= Math.floor((x + r) / ECELL); i++) {
+    for (let j = Math.floor((z - r) / ECELL); j <= Math.floor((z + r) / ECELL); j++) {
+      for (const e of EGRID.get(i * 4099 + j) || []) if (!seen.has(e.id)) { seen.add(e.id); out.push(e); }
+    }
+  }
+  return out;
+}
+
 // A lane: one way along an edge, from junction `from` to junction `to`,
-// LANE metres right of the middle, between the stop lines.
+// LANE metres right of the middle, between the stop lines. (Made once, and
+// shared: don't change one.)
+const LANES = new Map();
 export function lane(edgeId, fromId) {
   const e = EDGES[edgeId];
+  const key = edgeId * 2 + (e.a === fromId ? 0 : 1);
+  let L = LANES.get(key);
+  if (L) return L;
   const A = NODES[fromId], B = NODES[e.a === fromId ? e.b : e.a];
-  const dx = Math.sign(B.x - A.x), dz = Math.sign(B.z - A.z);
+  const l = Math.hypot(B.x - A.x, B.z - A.z) || 1;
+  const dx = (B.x - A.x) / l, dz = (B.z - A.z) / l;
   const rx = -dz, rz = dx;       // right of travel
-  return {
+  L = {
     edge: edgeId, from: A.id, to: B.id, dx, dz, rx, rz,
-    x0: A.x + dx * STOP + rx * LANE, z0: A.z + dz * STOP + rz * LANE,
-    x1: B.x - dx * STOP + rx * LANE, z1: B.z - dz * STOP + rz * LANE,
-    len: e.len - STOP * 2,
+    x0: A.x + dx * A.stop + rx * LANE, z0: A.z + dz * A.stop + rz * LANE,
+    x1: B.x - dx * B.stop + rx * LANE, z1: B.z - dz * B.stop + rz * LANE,
+    len: Math.max(1, e.len - A.stop - B.stop),
     h: Math.atan2(dx, dz),
+    hw: !!e.hw,
   };
+  LANES.set(key, L);
+  return L;
 }
 
 // Traffic lights: every junction where three or four roads meet. Each runs
@@ -67,7 +159,7 @@ export function lane(edgeId, fromId) {
 // all red), offset junction to junction. Returns 'g', 'y' or 'r' for
 // traffic travelling along `axis`.
 export const CYCLE = 24;
-export function hasLights(nodeId) { return NODES[nodeId].edges.length >= 3; }
+export function hasLights(nodeId) { return NODES[nodeId].city && NODES[nodeId].edges.length >= 3; }
 export function light(nodeId, axis, t) {
   if (!hasLights(nodeId)) return 'g';
   const k = ((t + nodeId * 5.3) % CYCLE + CYCLE) % CYCLE;
@@ -76,15 +168,37 @@ export function light(nodeId, axis, t) {
 }
 
 // is (x, z) on the asphalt (not a sidewalk or a block)?
+const NEAR = [];
 export function onRoad(x, z) {
-  if (x < -200 - ROAD || x > 200 + ROAD || z < -200 - ROAD || z > 200 + ROAD) return false;
-  for (const L of LINES) {
-    if (Math.abs(x - L) < ROAD) return true;
-    if (Math.abs(z - L) < ROAD) return true;
+  if (x > -200 - ROAD && x < 200 + ROAD && z > -200 - ROAD && z < 200 + ROAD) {
+    for (const L of LINES) {
+      if (Math.abs(x - L) < ROAD) return true;
+      if (Math.abs(z - L) < ROAD) return true;
+    }
+  }
+  for (const e of edgesNear(x, z, 1, NEAR)) {
+    if (!e.hw) continue;
+    const A = NODES[e.a], B = NODES[e.b];
+    const vx = B.x - A.x, vz = B.z - A.z;
+    const t = Math.max(0, Math.min(1, ((x - A.x) * vx + (z - A.z) * vz) / (vx * vx + vz * vz)));
+    if (Math.hypot(x - A.x - vx * t, z - A.z - vz * t) < ROAD) return true;
   }
   return false;
 }
-export const groundY = (x, z) => (onRoad(x, z) ? 0 : SIDEWALK_Y);
+// The height of the ground at (x, z): the city's streets and sidewalks, the
+// rooms you walk into, the pier, or the land.
+const PIER = COUNTRY.pier;
+export function groundY(x, z) {
+  if (x > ROOMS_BOX.x0 && x < ROOMS_BOX.x1 && z > ROOMS_BOX.z0 && z < ROOMS_BOX.z1) return SIDEWALK_Y;
+  if (x >= CITY_BOX.x0 && x <= CITY_BOX.x1 && z >= CITY_BOX.z0 && z <= CITY_BOX.z1) return onRoad(x, z) ? 0 : SIDEWALK_Y;
+  if (x >= PIER.x0 && x <= PIER.x1 && z >= PIER.z0 && z <= PIER.z1) return PIER.y;
+  return heightAt(x, z);
+}
+// too deep to walk or drive (the sea, the lake)?
+export function inWater(x, z) {
+  const g = groundY(x, z);
+  return g < SEA_Y + 0.3 || (g < LAKE.y + 0.3 && g < waterY(x, z) + 0.3);
+}
 
 // the junction nearest a point, and the road (edge) nearest a point
 export function nearestNode(x, z) {
@@ -118,8 +232,8 @@ for (let bj = 0; bj < N - 1; bj++) {
 export const blockAt = (x, z) => BLOCKS.find((b) => x >= b.x0 - CURB + ROAD && x <= b.x1 + CURB - ROAD && z >= b.z0 - CURB + ROAD && z <= b.z1 + CURB - ROAD) || null;
 
 export function areaName(x, z) {
-  if (z > 205 && Math.abs(x) < 215) return 'The Harbour';
-  if (Math.abs(x) > 206 || z < -206) return 'Outskirts';
+  if (z > 205 && z < 245 && Math.abs(x) < 215) return 'The Harbour';
+  if (Math.abs(x) > 206 || z < -206 || z > 240) return countryName(x, z);
   const b = blockAt(x, z);
   if (b) return b.name;
   // on a road: the nearest block's
@@ -382,8 +496,8 @@ function build() {
   PLACES.pier = { x: -15, z: 232, name: 'Pier 3' };
   for (let x = -205; x <= 205; x += 6) prop('bollard', x, HARBOR.z1 + 0.6);
 
-  // street lamps along every road, on alternate sides
-  for (const e of EDGES) {
+  // street lamps along every street, on alternate sides
+  for (const e of EDGES.slice(0, CITY_EDGES)) {
     const A = NODES[e.a], B = NODES[e.b];
     const dx = Math.sign(B.x - A.x), dz = Math.sign(B.z - A.z);
     const down = Math.abs((A.x + B.x) / 2) < 90 && Math.abs((A.z + B.z) / 2) < 90;
@@ -400,11 +514,11 @@ function build() {
   }
   // traffic lights at the junctions that have them
   for (const n of NODES) {
-    if (n.edges.length < 3) continue;
+    if (!hasLights(n.id)) continue;
     for (const [sx, sz] of [[1, 1], [-1, -1], [1, -1], [-1, 1]]) prop('signal', n.x + sx * (ROAD + 0.7), n.z + sz * (ROAD + 0.7), 0, { node: n.id, sx, sz });
   }
   // hydrants, bins and phone boxes along the sidewalks; parking at the kerb
-  for (const e of EDGES) {
+  for (const e of EDGES.slice(0, CITY_EDGES)) {
     const A = NODES[e.a], B = NODES[e.b];
     const dx = Math.sign(B.x - A.x), dz = Math.sign(B.z - A.z);
     for (const side of [1, -1]) {
@@ -424,6 +538,13 @@ function build() {
       }
     }
   }
+
+  // out in the country: the towns' buildings (each at its own height), their
+  // parking, props and lamps
+  for (const b of COUNTRY.buildings) BUILDINGS.push({ ...b, country: true });
+  for (const p of COUNTRY.props) PROPS.push({ ...p, country: true });
+  for (const sp of COUNTRY.parking) PARKING.push({ ...sp, country: true });
+  for (const l of COUNTRY.lamps) LAMPS.push({ ...l });
 }
 build();
 
@@ -463,6 +584,7 @@ for (const b of BLOCKS) {
 
 // --------------------------------------------------------------- solids --
 const PROP_SOLID = {
+  lifeguard: [[1.3, 1.3], 3.2, false], plane: [[2.2, 14], 5, false],
   lamp: [0.18, 7, true], parkLamp: [0.14, 4.2, true], lotLamp: [0.22, 7, true], signal: [0.15, 4.5, true],
   hydrant: [0.22, 0.8, true], bin: [0.3, 1.1, true], phone: [0.45, 2.2, true], newsbox: [0.3, 1.1, true], mailbox: [0.25, 1.2, true],
   bench: [[0.9, 0.3], 0.9, true], tree: [0.3, 6, false], planter: [[1.0, 1.0], 0.6, true], pump: [[0.5, 0.35], 1.6, false],
@@ -470,43 +592,47 @@ const PROP_SOLID = {
   crane: [[5.5, 1.2], 30, false], mallSign: [[0.3, 0.3], 6, false], excavator: [[1.6, 3.2], 3, false], flag: [0.1, 9, true],
 };
 
+// (out in the country, things stand on the ground: heights are from there)
+const FLORA_SOLID = { pine: [0.35, 9, false], oak: [0.4, 7, false], palm: [0.3, 8, false], rock: [1.3, 1.6, false], cactus: [0.3, 2.4, true] };
 export function staticSolids() {
   const out = [];
-  for (const b of BUILDINGS) out.push({ x0: b.x0, x1: b.x1, z0: b.z0, z1: b.z1, y0: 0, y1: b.h, building: b });
+  for (const b of BUILDINGS) { const y = b.y || 0; out.push({ x0: b.x0, x1: b.x1, z0: b.z0, z1: b.z1, y0: y - 1, y1: y + b.h, building: b }); }
   for (const w of SOLID_EXTRA) out.push({ ...w });
   for (const p of PROPS) {
     const S = PROP_SOLID[p.t];
     if (!S) continue;
     let [r, h, small] = S;
+    const y = p.country ? p.y - 0.5 : 0;
     if (p.t === 'rubble') r = [p.s * 0.5, p.s * 0.5];
     if (p.t === 'tree' && p.big) r = 0.4;
     if (Array.isArray(r)) {
       let [hx, hz] = r;
       if (Math.abs(Math.sin(p.h)) > 0.7) [hx, hz] = [hz, hx];
-      out.push({ x0: p.x - hx, x1: p.x + hx, z0: p.z - hz, z1: p.z + hz, y0: 0, y1: h * (p.stack || 1), small, prop: p.t });
-    } else out.push({ x0: p.x - r, x1: p.x + r, z0: p.z - r, z1: p.z + r, y0: 0, y1: h, small, prop: p.t });
-    if (p.t === 'canopy') { /* pillars only */ }
+      out.push({ x0: p.x - hx, x1: p.x + hx, z0: p.z - hz, z1: p.z + hz, y0: y, y1: y + h * (p.stack || 1), small, prop: p.t });
+    } else out.push({ x0: p.x - r, x1: p.x + r, z0: p.z - r, z1: p.z + r, y0: y, y1: y + h, small, prop: p.t });
   }
   for (const p of PROPS.filter((q) => q.t === 'canopy')) {
+    const y = p.country ? groundY(p.x, p.z) : 0;
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const x = p.x + sx * (p.w / 2 - 0.6), z = p.z + sz * (p.d / 2 - 0.6);
-      out.push({ x0: x - 0.25, x1: x + 0.25, z0: z - 0.25, z1: z + 0.25, y0: 0, y1: 5, small: false });
+      out.push({ x0: x - 0.25, x1: x + 0.25, z0: z - 0.25, z1: z + 0.25, y0: y - 0.5, y1: y + 5, small: false });
     }
   }
-  // the edge of the world, and the water
-  const B = BOUND, t = 2;
-  out.push({ x0: -B - t, x1: B + t, z0: -B - t, z1: -B, y0: 0, y1: 20 });
-  out.push({ x0: -B - t, x1: B + t, z0: B, z1: B + t, y0: 0, y1: 20 });
-  out.push({ x0: -B - t, x1: -B, z0: -B, z1: B, y0: 0, y1: 20 });
-  out.push({ x0: B, x1: B + t, z0: -B, z1: B, y0: 0, y1: 20 });
-  out.push({ x0: -B, x1: B, z0: HARBOR.z1 + 0.3, z1: HARBOR.z1 + 1.2, y0: 0, y1: 1.0 });
+  for (const f of FLORA) {
+    const S = FLORA_SOLID[f.t];
+    if (!S) continue;
+    const r = S[0] * f.s;
+    out.push({ x0: f.x - r, x1: f.x + r, z0: f.z - r, z1: f.z + r, y0: f.y - 0.5, y1: f.y + S[1] * f.s, small: S[2], prop: f.t });
+  }
+  // the quay's edge
+  out.push({ x0: HARBOR.x0, x1: HARBOR.x1, z0: HARBOR.z1 + 0.3, z1: HARBOR.z1 + 1.2, y0: -2, y1: 1.0 });
   return out;
 }
 
-export function makeSolids() { return new Solids(staticSolids()); }
+export function makeSolids() { return new Solids(staticSolids(), { ground: groundY, terrain: heightAt }); }
 
 // is (x, z) somewhere a person could stand (not inside anything)?
 export function openAt(solids, x, z, r = 0.4) {
   const p = { x, z };
-  return !solids.resolveCircle(p, r, 0, true);
+  return !inWater(x, z) && !solids.resolveCircle(p, r, groundY(x, z), true);
 }

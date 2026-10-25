@@ -1,19 +1,20 @@
 // The buildings you can walk into: your place, Kingsgate Arms, Sal's Diner,
 // and the offices of the three people with work for you. Each has a door on
 // the front of its building in the city; walk into it and you're inside.
-// The rooms themselves are laid out off the east edge of the map, behind
-// the city's wall where nobody outside can see them, one to a row of the
-// light grid's squares so their ceiling lights (shared/lights.js) light
-// only their own room. Positions inside are ordinary world coordinates, so
+// The rooms themselves are laid out out at sea off the south-east coast
+// (world.js's ROOMS_BOX), where nobody outside will see them, a row of the
+// light grid's squares apart so their ceiling lights (shared/lights.js)
+// light only their own room. Positions inside are ordinary world coordinates, so
 // collision, the host and the network treat a room like anywhere else.
 //
 // Every room is a box with the door in the middle of its south wall
 // (local x across from the west wall, z down from the north wall).
 
-import { PLACES, BUILDINGS, SIDEWALK_Y, staticSolids } from './city.js';
+import { PLACES, BUILDINGS, SIDEWALK_Y, staticSolids, groundY } from './city.js';
+import { heightAt } from './world.js';
 import { Solids } from './collide.js';
 
-export const IX = 265;               // the rooms start here, east of the wall
+export const IX = 960;               // the rooms start here (and run south from z = 296)
 export const ROOM_H = 3.2;           // floor to ceiling
 const WALL_T = 0.25;
 
@@ -65,7 +66,7 @@ function room(id, o) {
 // a living room with a kitchen at one end, and a bedroom through the back
 room('home', {
   name: 'Your Place', kind: 'home', place: 'safehouse', building: 'Your Place',
-  x0: IX, z0: -179, w: 22, d: 10, doorX: 6, floor: 'wood', wall: 0xd8ccb4,
+  x0: IX, z0: 296, w: 22, d: 10, doorX: 6, floor: 'wood', wall: 0xd8ccb4,
   lights: [[6, 5], [18, 5]],
   walls: [[14, 0, 14.15, 6.2], [14, 7.8, 14.15, 10]],
   items: [
@@ -94,7 +95,7 @@ room('home', {
 // ---------------------------------------------------------- Kingsgate Arms
 room('guns', {
   name: 'Kingsgate Arms', kind: 'shop', place: 'guns', building: 'Kingsgate Arms',
-  x0: IX, z0: -155, w: 12, d: 10, doorX: 6, floor: 'tile', wall: 0x8a8478,
+  x0: IX, z0: 320, w: 12, d: 10, doorX: 6, floor: 'tile', wall: 0x8a8478,
   lights: [[6, 5]],
   items: [
     { t: 'counter', x: 6, z: 3.4, w: 7, d: 0.8, h: 1.05, col: 0x3a2a1c, glass: true },
@@ -112,7 +113,7 @@ room('guns', {
 // ---------------------------------------------------------- Sal's Diner
 room('diner', {
   name: "Sal's Diner", kind: 'diner', place: 'diner', building: "Sal's Diner",
-  x0: IX, z0: -131, w: 22, d: 10, doorX: 6, floor: 'checker', wall: 0xe8dcc0,
+  x0: IX, z0: 344, w: 22, d: 10, doorX: 6, floor: 'checker', wall: 0xe8dcc0,
   lights: [[6, 5], [18, 5]],
   items: [
     { t: 'counter', x: 11, z: 2.3, w: 14, d: 0.8, h: 1.05, col: 0xc83a3a },
@@ -136,7 +137,7 @@ room('diner', {
 // ------------------------------------------------------------- the offices
 room('okafor', {
   name: "Okafor's Motors", kind: 'office', place: 'okafor', building: "Okafor's Motors",
-  x0: IX, z0: -107, w: 12, d: 10, doorX: 6, floor: 'carpet', wall: 0xc8c0a8,
+  x0: IX, z0: 368, w: 12, d: 10, doorX: 6, floor: 'carpet', wall: 0xc8c0a8,
   lights: [[6, 5]],
   items: [
     { t: 'desk', x: 6, z: 3, w: 2.4, d: 1.1, h: 0.76, col: 0x5a3a22, face: 'n' },
@@ -155,7 +156,7 @@ room('okafor', {
 
 room('voss', {
   name: 'Voss Freight', kind: 'office', place: 'voss', building: 'VOSS FREIGHT',
-  x0: IX, z0: -83, w: 12, d: 10, doorX: 6, floor: 'concrete', wall: 0x7a8088,
+  x0: IX, z0: 392, w: 12, d: 10, doorX: 6, floor: 'concrete', wall: 0x7a8088,
   lights: [[6, 5]],
   items: [
     { t: 'desk', x: 4, z: 2.6, w: 2.6, d: 1.1, h: 0.76, col: 0x2a2a2e, face: 'n' },
@@ -171,7 +172,7 @@ room('voss', {
 
 room('dale', {
   name: "Mercer's Pawn", kind: 'office', place: 'dale', building: "Mercer's Pawn",
-  x0: IX, z0: -59, w: 12, d: 10, doorX: 6, floor: 'lino', wall: 0x8a7a5a,
+  x0: IX, z0: 416, w: 12, d: 10, doorX: 6, floor: 'lino', wall: 0x8a7a5a,
   lights: [[6, 5]],
   items: [
     { t: 'counter', x: 6, z: 3, w: 6, d: 0.8, h: 1.0, col: 0x4a3a28, glass: true },
@@ -220,4 +221,4 @@ export function interiorSolids() {
 export const FLOOR_Y = SIDEWALK_Y;
 
 // everything solid: the city and the rooms
-export function worldSolids() { return new Solids([...staticSolids(), ...interiorSolids()]); }
+export function worldSolids() { return new Solids([...staticSolids(), ...interiorSolids()], { ground: groundY, terrain: heightAt }); }

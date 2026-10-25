@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CAR_TYPES, CAR_KEYS, PAINT, TAXI_PAINT } from '../shared/car.js';
+import { groundY } from '../shared/city.js';
 import * as TX from './textures.js';
 
 const shape = (pts) => {
@@ -188,6 +189,8 @@ export class CarView {
     scene.add(g);
     this.x = this.z = this.h = 0;
     this.roll = 0;
+    this.pitch = this.tilt = 0;
+    g.rotation.order = 'YXZ';
     this.smokeT = 0;
     this.near = true;
   }
@@ -202,12 +205,21 @@ export class CarView {
   // x, z, heading, speed, steer, flags (from the host or your own car)
   place(x, z, h, v, steer, flags, dt, t) {
     this.x = x; this.z = z; this.h = h;
-    this.root.position.set(x, 0, z);
+    // sit on the ground under the wheels: up and down hills, a kerb under
+    // one side
+    const s = Math.sin(h), c = Math.cos(h), D = this.M.D, f = D.wb / 2, w = D.W * 0.42;
+    const yF = groundY(x + s * f, z + c * f), yB = groundY(x - s * f, z - c * f);
+    const yL = groundY(x + c * w, z - s * w), yR = groundY(x - c * w, z + s * w);
+    const k = Math.min(1, dt * 14);
+    this.pitch += (Math.atan2(yF - yB, 2 * f) - this.pitch) * k;
+    this.tilt += (Math.atan2(yL - yR, 2 * w) - this.tilt) * k;
+    this.root.position.set(x, Math.max((yF + yB) / 2, (yL + yR) / 2), z);
     this.root.rotation.y = h;
+    this.root.rotation.x = -this.pitch;
     // lean into corners a touch
     const lean = Math.max(-0.05, Math.min(0.05, -steer * v * 0.004));
     this.roll += (lean - this.roll) * Math.min(1, dt * 5);
-    this.root.rotation.z = this.roll;
+    this.root.rotation.z = this.roll + this.tilt;
     for (const w of this.wheels) w.rotation.y = -steer;
     // headlights after dark (CarView.night: how dark it is, 0-1)
     const dead = (flags & 8) !== 0, N = CarView.night;

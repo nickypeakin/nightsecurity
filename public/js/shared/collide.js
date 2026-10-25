@@ -5,14 +5,21 @@
 //
 // A box can be `small` (a lamp post, a hydrant, a bench): people walk round
 // it, cars go straight through (with a clang).
+//
+// Out of town the ground itself rises and falls: given `terrain` (the
+// land's height at x, z), rays stop where they go into a hill, and given
+// `ground` (what you stand on at x, z), `clear` measures its heights from
+// there.
 
 const CELL = 8;
 const key = (ix, iz) => ix * 100003 + iz;
 
 export class Solids {
-  constructor(boxes = []) {
+  constructor(boxes = [], { ground = null, terrain = null } = {}) {
     this.grid = new Map();
     this.all = [];
+    this.ground = ground;
+    this.terrain = terrain;
     for (const b of boxes) this.add(b);
   }
 
@@ -92,11 +99,36 @@ export class Solids {
       }
       if (best && best.t < t - CELL) break;
     }
+    if (this.terrain) {
+      const g = this.groundHit(ox, oy, oz, dx, dy, dz, best ? best.t : maxD);
+      if (g != null) best = { t: g, nx: 0, ny: 1, nz: 0, box: null, ground: true };
+    }
     return best;
   }
 
-  // can you see from a to b (eye heights included)?
+  // where a ray first goes into the land (or null), within maxD
+  groundHit(ox, oy, oz, dx, dy, dz, maxD) {
+    const H = this.terrain;
+    const step = 2;
+    let prev = 0;
+    if (oy - H(ox, oz) < -0.05) return null;          // (starting underground: the city's floors)
+    for (let t = step; ; t += step) {
+      const tt = Math.min(t, maxD);
+      if (oy + dy * tt < H(ox + dx * tt, oz + dz * tt)) {
+        // narrow it down
+        let lo = prev, hi = tt;
+        for (let k = 0; k < 6; k++) { const m = (lo + hi) / 2; if (oy + dy * m < H(ox + dx * m, oz + dz * m)) hi = m; else lo = m; }
+        return lo;
+      }
+      prev = tt;
+      if (tt >= maxD) return null;
+    }
+  }
+
+  // can you see from a to b? (heights over the ground at each end, if the
+  // ground's known; otherwise absolute)
   clear(ax, ay, az, bx, by, bz) {
+    if (this.ground) { ay += this.ground(ax, az); by += this.ground(bx, bz); }
     const dx = bx - ax, dy = by - ay, dz = bz - az;
     const d = Math.hypot(dx, dy, dz);
     if (d < 1e-3) return true;
@@ -134,7 +166,7 @@ export function rayCar(ox, oy, oz, dx, dy, dz, c, maxD) {
   const px = ox - c.x, pz = oz - c.z;
   const lf = px * s + pz * co, lr = -px * co + pz * s;
   const df = dx * s + dz * co, dr = -dx * co + dz * s;
-  const h = rayBox(lr, oy, lf, dr, dy, df, { x0: -c.hw, x1: c.hw, y0: 0.15, y1: c.ht, z0: -c.hl, z1: c.hl }, maxD);
+  const h = rayBox(lr, oy - (c.y || 0), lf, dr, dy, df, { x0: -c.hw, x1: c.hw, y0: 0.15, y1: c.ht, z0: -c.hl, z1: c.hl }, maxD);
   return h ? h.t : -1;
 }
 
