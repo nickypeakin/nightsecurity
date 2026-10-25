@@ -229,7 +229,7 @@ export class PersonView {
       // in the fist, the barrel on along the forearm
       this.gun.position.set(0, -0.085, 0.0);
       this.gun.rotation.set(Math.PI / 2, 0, 0);
-      this.rig.arms[0].wrist.add(this.gun);
+      this.rig.arms[1].wrist.add(this.gun);
     }
   }
 
@@ -249,6 +249,15 @@ export class PersonView {
     const p = pose || ANIMS[this.anim] || 'stand';
     const aiming = p === 'aim' && this.w > 0;
     this.hold(this.anim === 3 || aiming ? this.w : 0);
+    // a phone, for phone calls
+    if (p === 'phone' && !this.phone) {
+      this.phone = new THREE.Group();
+      this.phone.add(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.16, 0.03), gunMats.black), new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.07, 0.012), gunMats.black));
+      this.phone.children[1].position.set(0.015, 0.1, 0);
+      this.phone.position.set(0, -0.09, 0.02);
+      this.rig.arms[1].wrist.add(this.phone);
+    }
+    if (this.phone) this.phone.visible = p === 'phone';
     const st = { pose: aiming ? (this.w >= 2 ? 'aim2' : 'aim') : p === 'aim' ? 'stand' : p, speed: this.speed, aimPitch, stiff: this.anim === 8 };
     if (p === 'collapse') st.lookYaw = 0;
     this.rig.update(dt, st);

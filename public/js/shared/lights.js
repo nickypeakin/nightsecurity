@@ -6,8 +6,11 @@
 // lamps go dark by clearing their square.
 
 import { LAMPS } from './city.js';
+import { INTERIORS, ROOM_H } from './interiors.js';
 
-export const LGRID = { x0: -252, z0: -252, cell: 12, nx: 42, nz: 42 };
+// (the grid runs on east past the city's wall to cover the rooms you can
+// walk into; their lights are always on)
+export const LGRID = { x0: -252, z0: -252, cell: 12, nx: 45, nz: 42 };
 export const REACH = LGRID.cell;
 export const FALLOFF = 0.022;
 
@@ -18,6 +21,7 @@ const KINDS = {
   park: { color: [1.0, 0.86, 0.6], power: 4.5 },
   lot: { color: [1.0, 0.72, 0.42], power: 11 },
   canopy: { color: [0.9, 0.96, 1.0], power: 16 },
+  indoor: { color: [1.0, 0.92, 0.8], power: 7 },
 };
 
 export const FIXTURES = [];
@@ -31,6 +35,16 @@ export const FIXTURES = [];
     taken.add(k);
     const K = KINDS[l.kind] || KINDS.street;
     FIXTURES.push({ i, j, k, x: l.x, z: l.z, y: l.y, kind: l.kind, color: K.color, power: K.power, lamp: l });
+  }
+  for (const r of INTERIORS) {
+    for (const l of r.lights) {
+      const i = Math.floor((l.x - LGRID.x0) / LGRID.cell), j = Math.floor((l.z - LGRID.z0) / LGRID.cell);
+      const k = j * LGRID.nx + i;
+      if (taken.has(k)) throw new Error(`two lights in one square in ${r.id}`);
+      taken.add(k);
+      const K = KINDS.indoor;
+      FIXTURES.push({ i, j, k, x: l.x, z: l.z, y: ROOM_H - 0.15, kind: 'indoor', indoor: true, color: K.color, power: K.power, room: r.id });
+    }
   }
 }
 

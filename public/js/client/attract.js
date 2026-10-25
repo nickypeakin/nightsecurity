@@ -1,6 +1,6 @@
-// The title screen's background: Kingsgate after midnight. The camera drifts
-// over the downtown towers, down a street of sodium lamps, past the harbour
-// cranes and the fence round where the mall used to be.
+// The title screen's background: Kingsgate late on a sunny afternoon. The
+// camera drifts over the downtown towers, down a long street, past the
+// harbour cranes and the fence round where the mall used to be.
 
 import * as THREE from 'three';
 
@@ -18,6 +18,7 @@ export class Attract {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1400);
     this.t = 0;
     this.i = 0;
+    this.hour = 17.3;
   }
 
   resize(w, h) {
@@ -34,6 +35,7 @@ export class Attract {
     const c = this.camera;
     c.position.set(...s.from.map((v, j) => v + (s.to[j] - v) * e));
     c.lookAt(...s.look);
+    if (this.world.hour !== this.hour || this.world.indoors) { this.world.indoors = false; this.world.setTime(this.hour); }
     this.world.update(performance.now() / 1000);
   }
 

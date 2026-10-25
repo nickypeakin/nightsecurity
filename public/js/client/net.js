@@ -88,10 +88,10 @@ class Emitter {
 // ------------------------------------------------------------------ host --
 export class HostLink extends Emitter {
   // startAt: which part of the story to begin at (for testing)
-  constructor(name, { online = false, startAt = 0 } = {}) {
+  constructor(name, { online = false, startAt = 0, save = null } = {}) {
     super();
     this.isHost = true;
-    this.lobby = new Lobby({ ticker: workerTicker, startAt });
+    this.lobby = new Lobby({ ticker: workerTicker, startAt, save });
     this.guests = new Set();
     this.id = this.lobby.add(name, (msg) => queueMicrotask(() => this.emit(msg)));
     if (online) this.goOnline();

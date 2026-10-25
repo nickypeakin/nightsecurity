@@ -151,6 +151,73 @@ export const pavers = () => cached('pavers', () => {
   return toTexture(c);
 });
 
+// --------------------------------------------------------------- floors --
+// indoors: planks, tiles, a diner's chequerboard, carpet, linoleum (each
+// texture covers 2 m)
+export const floorTex = (kind) => cached(`floor:${kind}`, () => {
+  const S = 256, rng = makeRng(`floor:${kind}`);
+  const [c, x] = canvas(S, S, 1);
+  if (kind === 'wood') {
+    x.fillStyle = '#7a5434';
+    x.fillRect(0, 0, S, S);
+    const n = 8, w = S / n;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < 3; j++) {
+        const len = S / 2 + rng() * S / 2, y0 = ((i * 97 + j * 61) % 4) * S / 4 + j * len;
+        const v = rng();
+        x.fillStyle = `rgb(${110 + v * 40},${74 + v * 28},${44 + v * 18})`;
+        x.fillRect(i * w + 1, y0 % S, w - 2, len);
+        x.fillRect(i * w + 1, (y0 % S) - S, w - 2, len);
+      }
+      x.fillStyle = 'rgba(30,18,8,0.7)';
+      x.fillRect(i * w, 0, 1.5, S);
+    }
+    for (let k = 0; k < 300; k++) { x.fillStyle = `rgba(40,24,10,${rng() * 0.25})`; x.fillRect(rng() * S, rng() * S, 1, 6 + rng() * 20); }
+  } else if (kind === 'checker') {
+    const n = 8, w = S / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { x.fillStyle = (i + j) % 2 ? '#1a1a1c' : '#e8e4da'; x.fillRect(i * w, j * w, w, w); }
+  } else if (kind === 'tile') {
+    x.fillStyle = '#5a5a58';
+    x.fillRect(0, 0, S, S);
+    const n = 4, w = S / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const v = 150 + rng() * 25; x.fillStyle = `rgb(${v},${v},${v - 6})`; x.fillRect(i * w + 2, j * w + 2, w - 4, w - 4); }
+  } else if (kind === 'carpet') {
+    x.fillStyle = '#3a4a5a';
+    x.fillRect(0, 0, S, S);
+    for (let k = 0; k < 4000; k++) { const v = rng(); x.fillStyle = `rgba(${v < 0.5 ? '20,30,40' : '90,110,130'},0.35)`; x.fillRect(rng() * S, rng() * S, 1.5, 1.5); }
+  } else if (kind === 'lino') {
+    x.fillStyle = '#b8a888';
+    x.fillRect(0, 0, S, S);
+    const n = 4, w = S / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { x.fillStyle = (i + j) % 2 ? 'rgba(120,96,60,0.35)' : 'rgba(255,250,230,0.15)'; x.fillRect(i * w, j * w, w, w); }
+  } else {
+    x.fillStyle = '#7a7872';
+    x.fillRect(0, 0, S, S);
+    for (let k = 0; k < 14; k++) blotch(x, rng() * S, rng() * S, 30 + rng() * 60, rng() < 0.5 ? 'rgba(40,40,38,A)' : 'rgba(150,148,140,A)', 0.2);
+  }
+  grain(x, 14, rng);
+  return toTexture(c);
+});
+
+// the guns on Kingsgate Arms' back wall: pegboard and silhouettes
+export const gunWall = () => cached('gunWall', () => {
+  const W = 1024, H = 256, rng = makeRng('gunWall');
+  const [c, x] = canvas(W, H, 1);
+  x.fillStyle = '#8a7458';
+  x.fillRect(0, 0, W, H);
+  x.fillStyle = 'rgba(40,30,20,0.6)';
+  for (let i = 8; i < W; i += 16) for (let j = 8; j < H; j += 16) { x.beginPath(); x.arc(i, j, 2, 0, 7); x.fill(); }
+  const gun = (gx, gy, s, long) => {
+    x.fillStyle = '#16161a';
+    x.fillRect(gx, gy, (long ? 150 : 60) * s, 12 * s);
+    x.fillRect(gx + (long ? 30 : 10) * s, gy + 10 * s, 14 * s, 28 * s);
+    if (long) { x.fillStyle = '#4a2e1a'; x.fillRect(gx - 40 * s, gy + 2 * s, 44 * s, 18 * s); }
+  };
+  for (let row = 0; row < 3; row++) for (let k = 0; k < 6; k++) gun(30 + k * 165 + rng() * 10, 25 + row * 78, 0.9, row !== 1);
+  grain(x, 10, rng);
+  return toTexture(c, { repeat: false });
+});
+
 // ------------------------------------------------------------ buildings --
 // A facade tile: `cols` bays by `rows` floors. Returns { map, glow } where
 // glow is the windows with their lights on.

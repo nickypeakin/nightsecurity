@@ -8,6 +8,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { mat } from './props.js';
+import { CITY_UNIFORMS } from './lighting.js';
+import { Interiors } from './interiorScene.js';
+import { START_HOUR, sunAt } from '../shared/config.js';
 import {
   LINES, ROAD, CURB, STOP, NODES, EDGES, BLOCKS, BUILDINGS, PROPS, GROUNDS, SOLID_EXTRA, HARBOR, SIDEWALK_Y, light, hasLights, PLACES,
 } from '../shared/city.js';
@@ -165,6 +168,61 @@ const SIGN_STYLE = [
 ];
 const SHOP_NAMES = ['LIQUOR', 'DONUTS', 'VIDEO', 'PAWN', 'LAUNDRY', 'PIZZA', 'SHOES', 'RECORDS', 'NAILS', 'CHECKS CASHED', 'DELI', 'TV REPAIR', 'BOOKS', 'BAR', 'FLORIST', 'TACOS'];
 
+// ------------------------------------------------------------------ sky
+const SKY_VERT = /* glsl */`
+  varying vec3 vDir;
+  varying vec2 vUv;
+  void main() {
+    vDir = position;
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const SKY_FRAG = /* glsl */`
+  uniform sampler2D stars;
+  uniform vec3 sunDir, zenith, horizon;
+  uniform float day, warm, time;
+  varying vec3 vDir;
+  varying vec2 vUv;
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
+  void main() {
+    vec3 d = normalize(vDir);
+    float up = max(d.y, 0.0);
+    vec3 col = mix(horizon, zenith, pow(up, 0.5));
+    float sd = max(dot(d, sunDir), 0.0);
+    // the low sun warms its side of the sky
+    vec3 dusk = mix(vec3(1.0, 0.52, 0.28), vec3(0.42, 0.36, 0.62), pow(up, 0.45));
+    col = mix(col, dusk, warm * (0.35 + 0.65 * pow(sd, 2.5)));
+    // clouds, thinning towards the horizon
+    vec2 cp = d.xz / max(d.y, 0.08) * 0.55 + vec2(time * 0.003, time * 0.001);
+    float c = smoothstep(0.5, 0.82, fbm(cp)) * smoothstep(0.02, 0.3, d.y);
+    vec3 cloud = mix(vec3(1.0), vec3(1.0, 0.68, 0.5), warm) * (0.82 + 0.3 * pow(sd, 4.0));
+    col = mix(col, cloud, c * 0.8);
+    // the sun
+    col += vec3(1.0, 0.9, 0.72) * (pow(sd, 1600.0) * 18.0 + pow(sd, 18.0) * 0.4 + pow(sd, 3.0) * 0.08) * (1.0 - c * 0.7);
+    vec3 night = texture2D(stars, vUv).rgb;
+    gl_FragColor = vec4(mix(night, col, day), 1.0);
+    #include <colorspace_fragment>
+  }`;
+const HILLS_VERT = /* glsl */`
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const HILLS_FRAG = /* glsl */`
+  uniform sampler2D map;
+  uniform float day;
+  uniform vec3 haze;
+  varying vec2 vUv;
+  void main() {
+    vec4 t = texture2D(map, vUv);
+    gl_FragColor = vec4(mix(t.rgb, haze, day), t.a * (1.0 - 0.35 * day));
+    #include <colorspace_fragment>
+  }`;
+
 // -------------------------------------------------------------- the city
 export class City {
   constructor() {
@@ -181,23 +239,52 @@ export class City {
     this.buildBuildings();
     this.buildExtras();
     this.buildProps();
+    // everything above is the outdoors (hidden while you're inside)
+    this.outdoors = [...s.children];
+    this.interiors = new Interiors(s);
+    this.room = null;
     this.buildLights();
   }
 
+  // inside one of the rooms (its id), or out in the city (null)
+  setRoom(id) {
+    if (id === this.room) return;
+    this.room = id;
+    this.indoors = !!id;
+    for (const o of this.outdoors) o.visible = !id;
+    this.interiors.show(id);
+    this.interiors.doors.visible = !id;
+    this.setTime(this.hour);
+  }
+
   // ----------------------------------------------------------- sky, water
+  // The sky is a shader: blue by day with the sun and drifting clouds, red
+  // and gold at either end of it, the stars (a painted texture) at night.
   buildSky() {
     const s = this.scene;
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.MeshBasicMaterial({ map: TX.sky(), side: THREE.BackSide, fog: false, depthWrite: false }));
+    this.skyU = {
+      stars: { value: TX.sky() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, day: { value: 0 }, warm: { value: 0 }, time: { value: 0 },
+      zenith: { value: new THREE.Color(0x2a62c0) }, horizon: { value: new THREE.Color(0xa8c4dc) },
+    };
+    const sky = (this.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), new THREE.ShaderMaterial({
+      uniforms: this.skyU, side: THREE.BackSide, depthWrite: false, fog: false, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
+    })));
     sky.renderOrder = -10;
+    sky.frustumCulled = false;
     s.add(sky);
-    const sl = new THREE.Mesh(new THREE.CylinderGeometry(640, 640, 150, 48, 1, true), new THREE.MeshBasicMaterial({ map: TX.skyline(), side: THREE.BackSide, transparent: true, fog: false, depthWrite: false }));
+    // far hills round the horizon: a dark line with lights by night, haze by day
+    this.hillsU = { map: { value: TX.skyline() }, day: { value: 0 }, haze: { value: new THREE.Color(0x8aa0b8) } };
+    const sl = (this.hills = new THREE.Mesh(new THREE.CylinderGeometry(640, 640, 150, 48, 1, true), new THREE.ShaderMaterial({
+      uniforms: this.hillsU, side: THREE.BackSide, transparent: true, depthWrite: false, fog: false, vertexShader: HILLS_VERT, fragmentShader: HILLS_FRAG,
+    })));
     sl.position.y = 40;
     sl.renderOrder = -9;
+    sl.frustumCulled = false;
     s.add(sl);
-    const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.glow(), color: 0xdde8ff, fog: false, depthWrite: false }));
-    moon.position.set(-300, 380, -520);
-    moon.scale.setScalar(70);
-    s.add(moon);
+    this.moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.glow(), color: 0xdde8ff, fog: false, depthWrite: false, transparent: true }));
+    this.moon.position.set(-300, 380, -520);
+    this.moon.scale.setScalar(70);
+    s.add(this.moon);
     const water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 900), M.water);
     water.rotation.x = -Math.PI / 2;
     water.position.set(0, -1.1, HARBOR.z1 + 450);
@@ -357,6 +444,7 @@ export class City {
     const tex = TX.sign(name, { w: 768, h: 128, bg: st[0], fg: st[1], font: st[2], glow: st[3] });
     const w = (side === 'n' || side === 's' ? b.x1 - b.x0 : b.z1 - b.z0) - 1.2;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.9), new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color().setScalar(st[3] ? 1.6 : 1.0) }));
+    m.userData.glow = st[3] ? 1.6 : 1.0;
     const out = 0.12;
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
     if (side === 'n') m.position.set(cx, 4.2, b.z0 - out), m.rotation.y = Math.PI;
@@ -392,6 +480,7 @@ export class City {
     const tex = TX.sign(b.name.toUpperCase(), { w: 1024, h: 160, bg: st[0], fg: st[1], font: st[2], glow: st[3] });
     const w = Math.min(b.x1 - b.x0 - 2, 22);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.16), new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color().setScalar(st[3] ? 1.5 : 1.0) }));
+    m.userData.glow = st[3] ? 1.5 : 1.0;
     const face = b.face || 's';
     const y = Math.min(b.h - 1.2, 6 + st[4] * 2);
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
@@ -541,12 +630,68 @@ export class City {
     const s = this.scene;
     this.hemi = new THREE.HemisphereLight(0x5a6a90, 0x201a14, 0.22);
     this.ambient = new THREE.AmbientLight(0x8a90a8, 0.18);
-    s.add(this.hemi, this.ambient);
+    this.sun = new THREE.DirectionalLight(0xfff4e0, 0);
+    s.add(this.hemi, this.ambient, this.sun, this.sun.target);
     // your headlights (when you drive) and a flash for gunfire and fire
     this.head = new THREE.SpotLight(0xfff4e0, 0, 46, 0.5, 0.55, 1.2);
     s.add(this.head, this.head.target);
     this.flash = new THREE.PointLight(0xffc070, 0, 16, 1.6);
     s.add(this.flash);
+    this.bright = 1;
+    this.indoors = false;
+    this.setTime(START_HOUR);
+  }
+
+  // Light the city for an hour of the day (0-24). Lamps, lit windows and
+  // glowing signs come on as the sun goes down.
+  setTime(h) {
+    this.hour = h;
+    const S = (this.sunState = sunAt(h));
+    const { day, night, warm } = S;
+    const lerp = (a, b, k) => a + (b - a) * k;
+    // where the sun is: rises in the east (+x), over the south, sets in the west
+    const phi = Math.PI * S.k, e = Math.asin(Math.max(-1, Math.min(1, S.elev)));
+    const dir = S.up ? new THREE.Vector3(Math.cos(phi) * Math.cos(e), Math.sin(e), Math.sin(phi) * 0.45 * Math.cos(e)).normalize() : new THREE.Vector3(0.3, Math.sin(e), -0.5).normalize();
+    this.skyU.sunDir.value.copy(dir);
+    this.skyU.day.value = day;
+    this.skyU.warm.value = warm * day;
+    this.sun.position.copy(dir).multiplyScalar(300);
+    this.sun.target.position.set(0, 0, 0);
+    const lowSun = Math.max(0, Math.min(1, S.elev / 0.5));
+    this.sun.intensity = this.indoors ? 0 : day * lerp(1.8, 5.6, lowSun);
+    this.sun.color.setRGB(1, lerp(0.62, 0.96, lowSun), lerp(0.4, 0.88, lowSun));
+    const b = this.bright;
+    this.hemi.color.setHex(0x5a6a90).lerp(new THREE.Color(0xb0ccff), day);
+    this.hemi.groundColor.setHex(0x201a14).lerp(new THREE.Color(0x6a5e4c), day);
+    this.hemi.intensity = this.indoors ? 0.35 : lerp(0.22 * b, 2.1 * Math.sqrt(b), day);
+    this.ambient.intensity = this.indoors ? 0.3 : lerp(0.18 * b, 0.45, day);
+    // the haze: blue-grey by day, gold at sunrise and sunset, black at night
+    const hazeDay = new THREE.Color(0xa8c0d8).lerp(new THREE.Color(0xd8a888), warm);
+    this.fog.color.setHex(0x0a0c14).lerp(hazeDay, day);
+    this.fog.density = lerp(0.0072, 0.0034, day);
+    this.skyU.horizon.value.copy(hazeDay);
+    this.hillsU.day.value = day;
+    this.hillsU.haze.value.copy(hazeDay).multiplyScalar(0.82);
+    this.moon.material.opacity = night;
+    M.water.color.setHex(0x0a1626).lerp(new THREE.Color(0x2a5a7a), day);
+    // street lamps (the shader's light grid), lamp heads, windows and signs
+    CITY_UNIFORMS.cityScale.value = b * night;
+    for (const m of [M.lampHead, M.lampWhite]) m.emissiveIntensity = 0.04 + 2.36 * night;
+    M.globe.emissiveIntensity = 0.04 + 1.96 * night;
+    M.canopyGlow.emissiveIntensity = 0.3 + 1.9 * night;
+    for (const m of facadeMats.values()) m.emissiveIntensity = 1.25 * night;
+    for (const m of storeMats.values()) m.emissiveIntensity = 0.3 + 1.1 * night;
+    for (const m of this.signs.children) {
+      const g = m.userData.glow;
+      if (g && m.material.color) m.material.color.setScalar(1 + (g - 1) * night);
+    }
+  }
+
+  // keep the sky round the camera; clouds drift
+  follow(camera, t) {
+    this.sky.position.copy(camera.position);
+    this.hills.position.set(camera.position.x, 40, camera.position.z);
+    this.skyU.time.value = t;
   }
 
   // the traffic lights, by the host's clock
@@ -564,6 +709,7 @@ export class City {
   }
 
   render(renderer, camera, target) {
+    this.follow(camera, performance.now() / 1000);
     renderer.setRenderTarget(target);
     renderer.render(this.scene, camera);
   }

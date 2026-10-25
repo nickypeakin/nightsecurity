@@ -28,7 +28,8 @@ export const CITY_UNIFORMS = {
   cityGrid: { value: new THREE.Vector4(LGRID.x0, LGRID.z0, LGRID.cell, REACH) },
   cityN: { value: new THREE.Vector2(LGRID.nx, LGRID.nz) },
   cityFalloff: { value: FALLOFF },
-  cityScale: { value: 1 },
+  cityScale: { value: 1 },       // the street lamps (0 by day)
+  cityIndoor: { value: 1 },      // lights indoors (always on)
 };
 
 const VERT_PARS = /* glsl */`
@@ -48,7 +49,7 @@ const FRAG_PARS = /* glsl */`
 uniform sampler2D cityLight, citySpot;
 uniform vec4 cityGrid;
 uniform vec2 cityN;
-uniform float cityFalloff, cityScale;
+uniform float cityFalloff, cityScale, cityIndoor;
 varying vec3 vCityPos;
 `;
 const FRAG_LIGHT = /* glsl */`
@@ -69,7 +70,7 @@ const FRAG_LIGHT = /* glsl */`
       if ( h >= 1.0 ) continue;
       float win = 1.0 - h * h;
       win *= win;
-      vec3 col = L.rgb * cityScale * win / ( 1.0 + dot( d, d ) * cityFalloff );
+      vec3 col = L.rgb * ( S.z > 0.5 ? cityIndoor : cityScale ) * win / ( 1.0 + dot( d, d ) * cityFalloff );
       directLight.direction = normalize( ( viewMatrix * vec4( d, 0.0 ) ).xyz );
       directLight.color = col;
       directLight.visible = true;
@@ -93,7 +94,7 @@ const patch = (shader) => {
     .replace('#include <lights_fragment_begin>', FRAG_LIGHT);
 };
 THREE.MeshStandardMaterial.prototype.onBeforeCompile = patch;
-THREE.MeshStandardMaterial.prototype.customProgramCacheKey = () => 'city-lights-1';
+THREE.MeshStandardMaterial.prototype.customProgramCacheKey = () => 'city-lights-2';
 
 // off: a set of fixture cells (k) that are dark (knocked down, shot out)
 export function setLights(off = null) {
@@ -108,6 +109,7 @@ export function setLights(off = null) {
     lightData[i + 3] = f.y;
     spotData[i] = f.x;
     spotData[i + 1] = f.z;
+    spotData[i + 2] = f.indoor ? 1 : 0;
   }
   lightTex.needsUpdate = true;
   spotTex.needsUpdate = true;

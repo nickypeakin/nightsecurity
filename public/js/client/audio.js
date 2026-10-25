@@ -361,6 +361,13 @@ class Sound {
     if (!dst) return;
     this.burst(t, 0.06, dst, run ? 0.22 : 0.14, 'bandpass', 1200 + Math.random() * 400, 1.2, 0.003);
   }
+  // a phone ringing: two short trills
+  ring() {
+    if (!this.ctx) return;
+    const t = this.now;
+    for (const off of [0, 0.6]) for (let k = 0; k < 8; k++) this.osc(k % 2 ? 'square' : 'triangle', k % 2 ? 480 : 440, t + off + k * 0.05, 0.06, this.sfx, 0.035, 0.004);
+  }
+
   door() { if (!this.ctx) return; const t = this.now; this.burst(t, 0.12, this.sfx, 0.3, 'lowpass', 700, 1); this.osc('sine', 110, t, 0.1, this.sfx, 0.2, 0.001); }
   alarm(pos) {
     const t = this.now, dst = this.out(pos, 6);

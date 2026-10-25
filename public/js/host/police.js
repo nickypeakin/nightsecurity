@@ -44,7 +44,7 @@ export class Police {
   // a cop (or police car) has eyes on player p
   saw(p, by) {
     p.seenT = this.m.t;
-    const pos = this.m.playerPos(p);
+    const pos = this.m.outPos(p);
     p.lastSeen = { x: pos.x, z: pos.z };
   }
 
@@ -53,7 +53,7 @@ export class Police {
     let best = null, bd = 140;
     for (const p of this.m.players) {
       if (p.state !== 'alive' || !p.wanted) continue;
-      const pos = this.m.playerPos(p);
+      const pos = this.m.outPos(p);
       const d = Math.hypot(pos.x - cop.x, pos.z - cop.z);
       if (d < bd) { bd = d; best = p.id; }
     }
@@ -65,7 +65,7 @@ export class Police {
     for (const p of m.players) {
       if (p.state !== 'alive') continue;
       if (!p.wanted) { p.arrestT = 0; continue; }
-      const pos = m.playerPos(p);
+      const pos = m.outPos(p);
       // police cars see you too
       for (const c of m.cars.values()) {
         if (!c.police || c.dead || !c.ai) continue;
@@ -108,7 +108,7 @@ export class Police {
       if (after >= WANTED.cars[p.wanted]) continue;
       const cops = [...m.peds.values()].filter((c) => c.kind === 'cop' && !c.dead).length;
       if (cops > 14) continue;
-      const pos = m.playerPos(p);
+      const pos = m.outPos(p);
       // a lane 70-120 m away, out of sight if we can
       let best = null, bs = -Infinity;
       for (let k = 0; k < 24; k++) {
@@ -144,10 +144,10 @@ export class Police {
         if (c.ai.mode === 'chase') { c.ai.mode = 'cruise'; c.ai.target = null; c.ai.goal = null; c.ai.lane = null; }
         // a new target?
         const t = this.pickTarget(c);
-        if (t && Math.hypot(m.playerPos(m.player(t)).x - c.x, m.playerPos(m.player(t)).z - c.z) < 90) { c.chasing = t; c.ai.mode = 'chase'; c.siren = true; }
+        if (t && Math.hypot(m.outPos(m.player(t)).x - c.x, m.outPos(m.player(t)).z - c.z) < 90) { c.chasing = t; c.ai.mode = 'chase'; c.siren = true; }
         continue;
       }
-      const pos = m.playerPos(p);
+      const pos = m.outPos(p);
       // chase where they were last seen (or where they are, if we're close)
       const d = Math.hypot(pos.x - c.x, pos.z - c.z);
       c.ai.target = d < 45 || !p.lastSeen ? { x: pos.x, z: pos.z } : p.lastSeen;

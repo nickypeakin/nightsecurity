@@ -378,10 +378,11 @@ function eyeMat(iris, glint = false) {
 // Skin tones, hair, clothes. `top` and `bottom` pick the garments below.
 export const LOOKS = {
   // the four guards, in player-colour order: Gatehouse Security navy
-  friend0: { sex: 'm', skin: 0xdcae8a, iris: 0x4a3423, hair: 'short', hairColor: 0x2a1a10, hat: 'police', hatColor: 0x1e2636, top: 'uniform', topColor: 0x2c3a52, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.8 },
-  friend1: { sex: 'f', skin: 0x8a5638, iris: 0x2d1d12, hair: 'bun', hairColor: 0x120c09, top: 'uniform', topColor: 0x2c3a52, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.67 },
-  friend2: { sex: 'm', skin: 0xb77a52, iris: 0x3b2817, hair: 'buzz', hairColor: 0x15100c, hat: 'police', hatColor: 0x1e2636, top: 'uniform', topColor: 0x2c3a52, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.84 },
-  friend3: { sex: 'f', skin: 0xf0c8a6, iris: 0x45708a, hair: 'pony', hairColor: 0x9a4a2a, top: 'uniform', topColor: 0x2c3a52, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.64 },
+  // the four of you, out of uniform now the mall's gone
+  friend0: { sex: 'm', skin: 0xdcae8a, iris: 0x4a3423, hair: 'short', hairColor: 0x2a1a10, top: 'jacket', topColor: 0x3a2418, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.8 },
+  friend1: { sex: 'f', skin: 0x8a5638, iris: 0x2d1d12, hair: 'bun', hairColor: 0x120c09, top: 'bomber', topColor: 0x4a5a3a, inner: 0x1e1e1e, bottom: 'jeans', bottomColor: 0x1a1c22, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.67 },
+  friend2: { sex: 'm', skin: 0xb77a52, iris: 0x3b2817, hair: 'buzz', hairColor: 0x15100c, top: 'hoodie', topColor: 0x5a5a62, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0x1a1a1a, height: 1.84 },
+  friend3: { sex: 'f', skin: 0xf0c8a6, iris: 0x45708a, hair: 'pony', hairColor: 0x9a4a2a, top: 'jacket', topColor: 0x5a7fa8, bottom: 'trousers', bottomColor: 0x141416, shoes: 'boot', shoeColor: 0x141414, height: 1.64 },
   // Ray Okafor, the mall manager
   manager: { sex: 'm', skin: 0x5a3a28, iris: 0x1a120c, hair: 'buzz', hairColor: 0x2a2a28, glasses: true, top: 'suit', topColor: 0x34363c, inner: 0xe8e8e2, tie: 0x8a1a2a, bottom: 'trousers', bottomColor: 0x2a2c30, shoes: 'dress', shoeColor: 0x0e0e0e, height: 1.83, heavy: 1.05 },
   // Dale Mercer, nineteen years on nights, in his undershirt: it took his jacket
@@ -1052,6 +1053,21 @@ export class Rig {
       set('shRX', -1.5 - ap * 0.4); set('shRZ', 0.12); set('elR', -0.06); set('wrR', 0.1);
       if (pose === 'aim2') { set('shLX', -1.3 - ap * 0.4); set('shLZ', -0.42); set('shLY', -0.3); set('elL', -0.75); }
       else { set('shLX', moving ? s * amp * 0.4 : 0.05); set('elL', -0.3); }
+    } else if (pose === 'phone') {
+      // a phone held to the ear, the other hand on the hip
+      set('shRX', -1.2); set('shRZ', -0.38); set('shRY', 0.55); set('elR', -2.8); set('wrR', 0.25);
+      set('shLZ', -0.42); set('shLX', 0.25); set('elL', -1.5); set('shLY', 0.5);
+      set('neckX', 0.08 + Math.sin(t * 0.9) * 0.04); set('spineY', Math.sin(t * 0.5) * 0.05);
+    } else if (pose === 'talk') {
+      // talking with the hands
+      set('shRX', -0.45 + Math.sin(t * 2.3) * 0.22); set('elR', -1.0 + Math.sin(t * 3.1) * 0.35); set('shRZ', 0.18);
+      set('shLX', -0.3 + Math.sin(t * 1.7 + 1) * 0.16); set('elL', -0.8 + Math.sin(t * 2.6 + 2) * 0.25); set('shLZ', -0.14);
+      set('neckX', 0.04 + Math.sin(t * 2.7) * 0.05); set('spineY', Math.sin(t * 1.1) * 0.06);
+    } else if (pose === 'sleep') {
+      // lying on your back
+      set('pelvisY', 0.17); set('bodyRX', -1.5); set('neckX', 0.15);
+      set('shLX', 0.1); set('shRX', 0.1); set('shLZ', -0.2); set('shRZ', 0.2); set('elL', -0.4); set('elR', -0.3);
+      set('kneeL', 0.15); set('kneeR', 0.25); set('hipLX', -0.1);
     } else if (pose === 'drive') {
       set('pelvisY', 0.5); set('hipLX', -1.4); set('hipRX', -1.4); set('kneeL', 1.3); set('kneeR', 1.35);
       set('spineX', -0.12); set('shLX', -1.0); set('shRX', -1.0); set('shLZ', -0.12); set('shRZ', 0.12); set('elL', -0.6); set('elR', -0.6);
@@ -1168,7 +1184,7 @@ export class Rig {
       this.blink -= dt;
       lid = LID_OPEN + (LID_SHUT - LID_OPEN) * Math.sin(Math.max(0, this.blink / 0.16) * Math.PI);
     }
-    if (pose === 'collapse' || st.eyesClosed) lid = LID_SHUT;
+    if (pose === 'collapse' || pose === 'sleep' || st.eyesClosed) lid = LID_SHUT;
     if (st.possessed || st.noBlink) lid = LID_OPEN - 0.2;  // wide open
     for (const l of this.lids) l.rotation.x = lid - this.lookPitch * 0.3;
     this.setPossessed(!!st.possessed);

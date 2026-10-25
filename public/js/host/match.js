@@ -5,9 +5,10 @@
 // tells the host; the host decides what that hits and sends everyone a
 // snapshot of the city ten times a second.
 
-import { TICK, SNAP_EVERY, PLAYER_R, REACH, MAX_HP, MAX_ARMOR, WEAPONS, WEAPON_INDEX, PRICES, SPAWN_NEAR, SPAWN_FAR, DESPAWN, PEDS_PER_PLAYER, PEDS_MAX, TRAFFIC_PER_PLAYER, TRAFFIC_MAX, PED } from '../shared/config.js';
+import { TICK, SNAP_EVERY, PLAYER_R, REACH, MAX_HP, MAX_ARMOR, WEAPONS, WEAPON_INDEX, PRICES, SPAWN_NEAR, SPAWN_FAR, DESPAWN, PEDS_PER_PLAYER, PEDS_MAX, TRAFFIC_PER_PLAYER, TRAFFIC_MAX, PED, hourAt, sunAt } from '../shared/config.js';
 import { makeRng } from '../shared/rng.js';
-import { makeSolids, PLACES, PARKING, EDGES, WALK_NODES, lane, openAt, areaName } from '../shared/city.js';
+import { PLACES, PARKING, EDGES, WALK_NODES, lane, openAt, areaName } from '../shared/city.js';
+import { INTERIOR, interiorAt, worldSolids } from '../shared/interiors.js';
 import { rayCar, rayPerson, rayBox, circleVsCar, carVsCar } from '../shared/collide.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS, PAINT, TAXI_PAINT, carVel } from '../shared/car.js';
 import { TAPES, TAPE_PAY, TAPES_BONUS, BARKS, SHOP } from '../shared/story.js';
@@ -16,7 +17,14 @@ import { Crowd, makePed, PED_LOOKS, LOOK_COP, A, r2 } from './peds.js';
 import { Police } from './police.js';
 import { Missions } from './missions.js';
 
-export const INTRO_LEN = 9;
+export const INTRO_LEN = 32;     // (client/opening.js: OPENING_LEN)
+// your car's colours (one each, by player)
+const OWN_PAINT = [9, 0, 2, 8];
+// the parking spaces nearest your place, best first
+function homeSpots() {
+  const H = INTERIOR.home.door;
+  return PARKING.map((sp, i) => ({ i, d: Math.hypot(sp.x - H.x, sp.z - H.z) + (sp.kind === 'drive' ? -6 : 0) })).sort((a, b) => a.d - b.d).slice(0, 4).map((q) => q.i);
+}
 const ANIM_RUN = 2;
 
 export class Match {
@@ -27,7 +35,7 @@ export class Match {
     this.t = 0;
     this.ticks = 0;
     this.over = false;
-    this.solids = makeSolids();
+    this.solids = worldSolids();
     this.cars = new Map();
     this.peds = new Map();
     this.pickups = new Map();
@@ -46,6 +54,9 @@ export class Match {
     this.crowd = new Crowd(this);
     this.police = new Police(this);
     this.missions = new Missions(this, save);
+    // everybody's own car, parked at home
+    this.homeSpots = homeSpots();
+    for (const p of this.players) this.giveCar(p);
     this.streamT = 0;
     this.saveT = 0;
     this.lastView = -1;
@@ -53,10 +64,11 @@ export class Match {
   }
 
   makePlayer(r, i) {
-    const S = PLACES.safehouse;
+    // everybody wakes up at your place
+    const W = INTERIOR.home.spots.wake;
     return {
       id: r.id, name: r.name, color: r.color, idx: i,
-      x: S.x + (i - 1.5) * 1.6, z: S.z + 1.5, y: 0, h: Math.PI, ay: 0, ap: 0, anim: 0, speed: 0, aim: false,
+      x: W.x - (i % 2) * 1.1, z: W.z + Math.floor(i / 2) * 1.1, y: 0, h: W.h, ay: 0, ap: 0, anim: 0, speed: 0, aim: false,
       hp: MAX_HP, armor: 0, money: 100,
       ammo: WEAPONS.map((w, k) => (k === 0 ? Infinity : -1)),   // -1: don't have it
       clip: WEAPONS.map((w) => w.clip || 0),
@@ -67,11 +79,41 @@ export class Match {
     };
   }
 
+  // ------------------------------------------------------------ your own car
+  // (a Kestrel in your colour, in the driveway or at the kerb by your place)
+  giveCar(p) {
+    const i = this.homeSpots[p.idx % this.homeSpots.length];
+    const sp = PARKING[i];
+    const c = this.spawnCar('sports', sp.x, sp.z, sp.h, { paint: OWN_PAINT[p.idx % OWN_PAINT.length], keep: true });
+    c.owner = p.id;
+    this.spots[i].car = c.id;      // nobody else parks there
+    p.ownCar = c.id;
+    return c;
+  }
+
+  // a wrecked (or lost) car of yours comes back home, when nobody's looking
+  checkOwnCars() {
+    for (const p of this.players) {
+      const c = this.cars.get(p.ownCar);
+      const gone = !c || (c.dead && c.wreckT > 15);
+      if (!gone || this.players.some((q) => q.car === p.ownCar)) continue;
+      const sp = PARKING[this.homeSpots[p.idx % this.homeSpots.length]];
+      if (this.anyoneSees(sp.x, 1, sp.z) || this.carAt(sp.x, sp.z, 0.6)) continue;
+      if (c) { c.owner = null; c.keep = false; }
+      this.giveCar(p);
+    }
+  }
+
   // ------------------------------------------------------------ helpers
   player(id) { return this.players.find((p) => p.id === id) || null; }
   playerPos(p) {
     if (p.car != null) { const c = this.cars.get(p.car); if (c) return c; }
     return p;
+  }
+  // where someone is as far as the street's concerned (indoors: their door)
+  outPos(p) {
+    const R = p.car == null ? interiorAt(p.x, p.z) : null;
+    return R ? R.door : this.playerPos(p);
   }
   emit(msg, to = null) { this.send(to, msg); }
   sound(k, x = null, z = null) { this.emit({ t: 'fx', k, x, z }); }
@@ -551,8 +593,19 @@ export class Match {
   }
 
   buy(p, item) {
-    const G = PLACES.guns;
-    if (Math.hypot(p.x - G.x, p.z - G.z) > 5) return;
+    // a meal at Sal's: health back to full
+    if (item === 'meal') {
+      const E = INTERIOR.diner.spots.eat;
+      if (Math.hypot(p.x - E.x, p.z - E.z) > 2.2) return;
+      if (p.hp >= MAX_HP) { this.emit({ t: 'shop', ok: false, text: "You're not hungry." }, p.id); return; }
+      if (p.money < PRICES.meal) { this.emit({ t: 'shop', ok: false, text: "You can't afford that." }, p.id); return; }
+      p.money -= PRICES.meal;
+      p.hp = MAX_HP;
+      this.emit({ t: 'shop', ok: true, text: 'That hit the spot.' }, p.id);
+      return;
+    }
+    const G = INTERIOR.guns.spots.shop;
+    if (Math.hypot(p.x - G.x, p.z - G.z) > 2.4) return;
     const S = SHOP.find((s) => s.key === item);
     if (!S) return;
     if (S.armor) {
@@ -600,7 +653,7 @@ export class Match {
     this.missions.step(dt);
     this.stepPickups();
     this.streamT -= dt;
-    if (this.streamT <= 0) { this.streamT = 0.5; this.stream(); }
+    if (this.streamT <= 0) { this.streamT = 0.5; this.stream(); this.checkOwnCars(); }
     this.saveT += dt;
     if (this.saveT > 60) { this.saveT = 0; this.save(); }
     if (this.ticks % SNAP_EVERY === 0) this.emit(this.snapshot());
@@ -635,9 +688,9 @@ export class Match {
           }
         }
       }
-      // Your Place: walk in to save
-      const H = PLACES.safehouse;
-      if (p.car == null && Math.hypot(p.x - H.x, p.z - H.z) < 1.4 && this.t - (p.savedT || -99) > 15) {
+      // your bed: walk up to it to save
+      const H = INTERIOR.home.spots.save;
+      if (p.car == null && Math.hypot(p.x - H.x, p.z - H.z) < 1.0 && this.t - (p.savedT || -99) > 15) {
         p.savedT = this.t;
         this.save();
         this.emit({ t: 'banner', text: 'GAME SAVED', kind: 'save' }, p.id);
@@ -717,7 +770,7 @@ export class Match {
   stream() {
     const alive = this.players.filter((p) => p.state === 'alive');
     if (!alive.length) return;
-    const pos = alive.map((p) => this.playerPos(p));
+    const pos = alive.map((p) => this.outPos(p));
     const nearest = (x, z) => Math.min(...pos.map((q) => Math.hypot(q.x - x, q.z - z)));
 
     // despawn
@@ -729,7 +782,7 @@ export class Match {
     for (const c of [...this.cars.values()]) {
       if (this.players.some((p) => p.car === c.id)) continue;
       const d = nearest(c.x, c.z);
-      if (c.mission) continue;
+      if (c.mission || (c.owner && !c.dead)) continue;
       if (d > DESPAWN + 20 || (c.dead && c.wreckT > 45 && !this.anyoneSees(c.x, 1, c.z))) this.removeCar(c);
     }
 
@@ -786,7 +839,7 @@ export class Match {
     // parked cars
     PARKING.forEach((sp, i) => {
       const S = this.spots[i];
-      if (S.car != null) return;
+      if (S.car != null || this.homeSpots.includes(i)) return;     // (yours are kept for your car)
       const d = nearest(sp.x, sp.z);
       if (d > 105 || d < 30) return;
       if (S.cool > this.t) return;
@@ -809,11 +862,12 @@ export class Match {
     const view = (p) => {
       const pos = this.playerPos(p);
       return [p.id, r2(pos.x), r2(pos.z), r2(p.y), r2(p.h), r2(p.ay), r2(p.ap), p.anim, p.w, Math.max(0, Math.round(p.hp)), Math.round(p.armor), p.car ?? -1, p.seat, p.wanted,
-        p.money, (p.state === 'alive' ? 0 : p.state === 'wasted' ? 1 : 2) | (p.aim ? 4 : 0) | (p.searching ? 8 : 0) | (p.carry ? 16 : 0), p.ammo.map((a) => (a === Infinity ? -2 : a)), p.clip.slice()];
+        p.money, (p.state === 'alive' ? 0 : p.state === 'wasted' ? 1 : 2) | (p.aim ? 4 : 0) | (p.searching ? 8 : 0) | (p.carry ? 16 : 0), p.ammo.map((a) => (a === Infinity ? -2 : a)), p.clip.slice(), p.ownCar ?? -1];
     };
     const cars = [];
+    const night = sunAt(hourAt(this.t)).night;
     for (const c of this.cars.values()) {
-      const flags = (c.siren ? 1 : 0) | (c.lights || c.ai ? 2 : 0) | (c.fire ? 4 : 0) | (c.dead ? 8 : 0) | (c.ai?.horn ? 16 : 0) | (c.ai && c.ai.mode !== 'park' && c.driverLook != null ? 32 : 0) | (c.police ? 64 : 0) | ((c.riders || []).length ? 128 : 0);
+      const flags = (c.siren ? 1 : 0) | (c.lights || (c.ai && night > 0.15) ? 2 : 0) | (c.fire ? 4 : 0) | (c.dead ? 8 : 0) | (c.ai?.horn ? 16 : 0) | (c.ai && c.ai.mode !== 'park' && c.driverLook != null ? 32 : 0) | (c.police ? 64 : 0) | ((c.riders || []).length ? 128 : 0);
       cars.push([c.id, CAR_KEYS.indexOf(c.type), c.paint, r2(c.x), r2(c.z), r2(c.h), r2(c.v), r2(c.steer), Math.round(c.hp), flags, c.driverLook ?? -1, r2(c.s), r2(c.w)]);
     }
     const peds = [];

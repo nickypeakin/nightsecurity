@@ -7,13 +7,15 @@
 // decides what your bullets hit, who's wanted, what's been picked up.
 
 import * as THREE from 'three';
-import { PLAYER_R, WALK, JOG, SPRINT, JUMP_V, GRAVITY, REACH, WEAPONS, TICK, PRICES } from '../shared/config.js';
-import { PLACES, groundY, makeSolids, areaName } from '../shared/city.js';
+import { PLAYER_R, WALK, JOG, SPRINT, JUMP_V, GRAVITY, REACH, WEAPONS, TICK, PRICES, hourAt, clockText } from '../shared/config.js';
+import { PLACES, groundY, areaName } from '../shared/city.js';
+import { INTERIOR, INTERIORS, interiorAt, worldSolids } from '../shared/interiors.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS } from '../shared/car.js';
 import { circleVsCar, rayCar, rayPerson } from '../shared/collide.js';
 import { PEOPLE, HELP, TITLE, DATE } from '../shared/story.js';
 import { PersonView, PLAYER_LOOKS, GIVER_LOOKS, template, gunModel } from './people.js';
 import { CarView, prewarmCars } from './vehicles.js';
+import { Opening } from './opening.js';
 import { Fx, makeMarker, makePickup } from './fx.js';
 import { Radar } from './radar.js';
 import { sound } from './audio.js';
@@ -24,6 +26,7 @@ const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
 const wrap = (a) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
 const lerpA = (a, b, k) => a + wrap(b - a) * k;
+const SEAT_TMP = new THREE.Vector3();
 const DELAY = 0.15;              // how far behind the host's clock others are drawn
 
 // my animation codes (the host passes them on to everyone else)
@@ -77,11 +80,17 @@ export class Game {
     this.myIdx = Math.max(0, this.roster.findIndex((r) => r.id === this.me));
     this.myColor = this.roster[this.myIdx]?.color ?? 0;
     this.camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 1100);
-    this.solids = makeSolids();
+    this.solids = worldSolids();
     this.fx = new Fx(world);
     this.radar = new Radar($('radar'), $('mapCanvas'));
-    const S = PLACES.safehouse;
-    this.p = { x: S.x + (this.myIdx - 1.5) * 1.6, z: S.z + 1.5, y: 0, vy: 0, h: Math.PI, speed: 0, anim: 0, kx: 0, kz: 0, downT: 0 };
+    // you wake up at your place (where the host puts you too)
+    const S = INTERIOR.home.spots.wake;
+    this.p = { x: S.x - (this.myIdx % 2) * 1.1, z: S.z + Math.floor(this.myIdx / 2) * 1.1, y: 0, vy: 0, h: S.h, speed: 0, anim: 0, kx: 0, kz: 0, downT: 0 };
+    this.room = null;           // the room you're in (null: outdoors)
+    this.opening = new Opening(this);
+    this.tutorial = null;       // (after the opening: get to your car, then to Okafor)
+    this.doorArmed = true;      // (false just after a door, until you step off it)
+    this.doorT = 0;
     this.camYaw = 0;
     this.camPitch = 0.18;
     this.camDist = 3.6;
@@ -124,9 +133,16 @@ export class Game {
     this.arrows = [];
     this.myView = new PersonView(world.scene, PLAYER_LOOKS[this.myColor % 4], { lite: false });
     this.prewarm();
-    // the places you can always go: the gun shop counter, your door
-    this.addMarker('shop', PLACES.guns.x, PLACES.guns.z, 'shop', 0.9);
-    this.addMarker('save', PLACES.safehouse.x, PLACES.safehouse.z, 'save', 0.9);
+    // the gun shop counter, the diner counter, your bed, and every door
+    const I = INTERIOR;
+    this.addMarker('shop', I.guns.spots.shop.x, I.guns.spots.shop.z, 'shop', 0.7);
+    this.addMarker('eat', I.diner.spots.eat.x, I.diner.spots.eat.z, 'eat', 0.7);
+    this.addMarker('save', I.home.spots.save.x, I.home.spots.save.z, 'save', 0.7);
+    for (const R of INTERIORS) this.addMarker(`door:${R.id}`, R.door.x, R.door.z, 'door', 0.55);
+    // the people behind the counters
+    this.clerks = [];
+    const CLERK = { clerk: 3, cook: 9 };
+    for (const R of INTERIORS) for (const q of R.people) { const v = new PersonView(world.scene, CLERK[q.look] ?? 0); v.set(q.x, q.z, q.h, 0); v.room = R.id; this.clerks.push(v); }
 
     const L = link;
     this.off = [
@@ -143,7 +159,7 @@ export class Game {
       L.on('respawn', (m) => this.onRespawn(m)),
       L.on('weapon', (m) => { this.w = m.w; }),
       L.on('reload', (m) => { this.reloadUntil = this.T + m.s; sound.reload(); }),
-      L.on('shop', (m) => { this.shopMsg = m.ok ? 'Thanks.' : m.text; sound.jingle(m.ok ? 'cash' : 'failed'); }),
+      L.on('shop', (m) => { this.shopMsg = m.ok ? (m.text || 'Thanks.') : m.text; sound.jingle(m.ok ? 'cash' : 'failed'); if (!this.shopOpen && m.text) this.hud.say(null, m.text, '', 2.5); }),
       L.on('countdown', (m) => { this.countAt = m.at; }),
       L.on('credits', () => this.credits()),
       L.on('shush', () => { voice.stop(); this.hud.clearSubs(); for (const t of this.sayTimers || []) clearTimeout(t); this.sayTimers = []; }),
@@ -179,15 +195,17 @@ export class Game {
     const est = this.lastT + (now - this.lastLocal);
     this.lastT = Math.abs(s.T - est) > 1 ? s.T : est + (s.T - est) * 0.1;
     this.lastLocal = now;
+    if (this.intro >= 0 && s.intro < 0) this.endOpening();
     this.intro = s.intro;
+    this.opening.sync(s.intro);
     const seen = new Set();
     // players
     for (const r of s.p) {
-      const [id, x, z, y, h, ay, ap, anim, w, hp, armor, car, seat, wanted, money, flags, ammo, clip] = r;
+      const [id, x, z, y, h, ay, ap, anim, w, hp, armor, car, seat, wanted, money, flags, ammo, clip, ownCar] = r;
       if (id === this.me) {
         const M = this.me$;
         if (M.money !== money && M.money != null && money > M.money) sound.jingle('cash');
-        Object.assign(M, { hp, armor, money, wanted, ammo, clip, state: flags & 3, searching: !!(flags & 8), carry: !!(flags & 16), car, seat });
+        Object.assign(M, { hp, armor, money, wanted, ammo, clip, state: flags & 3, searching: !!(flags & 8), carry: !!(flags & 16), car, seat, ownCar: ownCar ?? -1 });
         if (WEAPONS[this.w] && ammo[this.w] === -1 && this.w !== 0) this.w = 0;
         // the host took me out of a car (it blew up, I was arrested)
         if (car < 0 && (this.myCar || this.ride) && !this.pending) { this.myCar = null; this.ride = null; }
@@ -258,28 +276,30 @@ export class Game {
   }
 
   onMission(m) {
+    // (the scene's first line can arrive just before this: count lines from
+    // the end of the last scene)
+    if (m.cut && !this.mission.cut) this.cutFade = 1;
+    if (!m.cut && this.mission.cut) { this.cutFade = 1; this.cutLine = 0; }
     this.mission = m;
     this.hud.mission(m.text || '');
     this.hud.cinematic(!!m.cut);
     // markers in the world for the places on the radar
     const want = new Map();
     for (const b of m.blips) {
-      if (b.k === 'giver') want.set(`giver:${b.l}`, ['giver', b.x, b.z, 1.2]);
+      if (b.k === 'giver') want.set(`giver:${b.l}`, ['giver', b.ix ?? b.x, b.iz ?? b.z, 0.9]);
       if (b.k === 'dest') want.set(`dest:${b.x}:${b.z}`, ['dest', b.x, b.z, Math.min(b.r || 4, 6)]);
       if (b.k === 'check' || b.k === 'check2') want.set(`${b.k}:${b.x}:${b.z}`, [b.k, b.x, b.z, b.k === 'check' ? 6.5 : 4]);
     }
     for (const [k, m2] of this.markers) if (!want.has(k) && !k.startsWith('fixed:')) { m2.removeFromParent(); this.markers.delete(k); }
     for (const [k, [kind, x, z, r]] of want) if (!this.markers.has(k)) this.addMarker(k, x, z, kind, r, false);
-    // whoever's giving the next job, standing by their marker (and still
-    // there while they tell you about it)
-    const givers = new Set(m.blips.filter((b) => b.k === 'giver').map((b) => b.l));
-    for (const [key, P] of Object.entries(PEOPLE)) {
-      const show = givers.has(P.blip) || (m.active && m.cut && m.giver === key);
+    // the people with jobs, always in their offices
+    for (const key of Object.keys(PEOPLE)) {
+      const show = !!INTERIOR[key];
       const v = this.givers.get(key);
       if (show && !v) {
         const g = new PersonView(this.world.scene, GIVER_LOOKS[key], { lite: false });
-        const at = PLACES[key];
-        g.set(at.x + 1.6, at.z + (at.h === Math.PI ? 0.8 : -0.8), at.h ?? 0, 0);
+        const at = INTERIOR[key].spots.giver;
+        g.set(at.x, at.z, at.h ?? 0, 0);
         this.givers.set(key, g);
       } else if (!show && v) { v.dispose(); this.givers.delete(key); }
     }
@@ -296,6 +316,7 @@ export class Game {
     const go = () => {
       const radio = m.radio;
       const name = WHO[m.who] || m.who;
+      if (!radio) { this.talking = m.who; this.talkUntil = performance.now() / 1000 + (m.dur || 4); this.cutLine = (this.cutLine || 0) + 1; }
       this.hud.say(name, m.text, radio ? 'radio' : 'talk', m.dur || 4);
       if (radio) sound.radio();
       voice.say(m.text, radio ? 'radio' : m.who, { salt: m.who?.length || 0 });
@@ -385,10 +406,37 @@ export class Game {
     Object.assign(this.p, { x: m.x, z: m.z, h: m.h, y: 0, vy: 0, kx: 0, kz: 0, downT: 0 });
     this.camYaw = m.h + Math.PI;
     this.w = 0;
+    this.doorArmed = false;
+  }
+
+  endOpening() {
+    this.opening.end();
+    voice.stop();
+    this.hud.clearSubs();
+    this.myView.root.visible = true;
+    this.room = null;            // (worked out again next frame)
+    this.camYaw = this.p.h + Math.PI;
+    this.camPitch = 0.22;
+    this.cutFade = 1;
+    if (this.opening.t > 1 && !this.mission.active) this.tutorial = 'leave';
+  }
+
+  // the first few minutes: out to your car, and over to Okafor's
+  tutorialText() {
+    const T = this.tutorial;
+    if (!T || this.mission.active) return null;
+    const me$ = this.me$;
+    if (T === 'leave' && this.myCar && this.myCar.id === me$.ownCar) this.tutorial = 'drive';
+    if (this.tutorial === 'drive') {
+      const D = INTERIOR.okafor.door, me = this.pos();
+      if (Math.hypot(me.x - D.x, me.z - D.z) < 14 || this.room === 'okafor') { this.tutorial = null; return null; }
+      return "Drive to ~y~Okafor's Motors~w~ on the Strip (~y~O~w~ on the radar).";
+    }
+    return this.room === 'home' ? 'Leave the house and get in your ~b~car~w~.' : 'Get in your ~b~car~w~ (the blue arrow on the radar).';
   }
 
   credits() {
-    const lines = [['KINGSGATE NIGHTS', 'The End'], ['Thanks for playing', 'Kingsgate is still yours. Find all 13 tapes.']];
+    const lines = [['GTA 7', 'The End'], ['Thanks for playing', 'Kingsgate is still yours. Find all 13 tapes.']];
     lines.forEach(([a, b], i) => setTimeout(() => this.hud.banner(a, b, 'credits'), 5000 + i * 4500));
   }
 
@@ -438,16 +486,31 @@ export class Game {
     this.handleKeys(dt);
     if (this.myCar) this.drive(dt);
     else if (!this.ride) this.walk(dt);
+    this.doors(dt);
+    // which room you're in (the city's hidden while you are)
+    const room = !this.myCar && !this.ride ? interiorAt(this.p.x, this.p.z) : null;
+    if ((room?.id ?? null) !== this.room && this.intro < 0) {
+      this.room = room?.id ?? null;
+      this.world.setRoom(this.room);
+      if (room) this.hud.area(room.name);
+      this.area = null;
+      this.areaT = room ? 99 : 0;
+    }
     this.combat(dt);
     // tell the host where we are
     this.sendT -= dt;
     if (this.sendT <= 0) { this.sendT = TICK; this.send(); }
+    this.doorFade = (this.doorFade || 0) + ((this.fadeTo || 0) - (this.doorFade || 0)) * Math.min(1, dt * 16);
     this.updateViews(dt);
     this.placeCamera(dt);
     this.updateHud(dt);
     this.updateSound(dt);
     this.fx.update(dt);
     this.world.update(this.T);
+    // the time of day (the sky, the sun, lamps and lit windows)
+    const hour = hourAt(this.T);
+    if (Math.abs(hour - (this.lastHour ?? -9)) > 0.01 || this.world.indoors !== this.wasIndoors) { this.world.setTime(hour); this.lastHour = hour; this.wasIndoors = this.world.indoors; }
+    CarView.night = this.world.sunState.night;
     I.endFrame();
   }
 
@@ -478,8 +541,9 @@ export class Game {
       if (I.hit('KeyG') && this.myCar.c.type === 'police') this.link.send({ t: 'siren' });
       if (I.hit('KeyR')) { this.radioOn = !this.radioOn; if (this.radioOn) sound.nextSong(); }
     }
-    // the gun shop
+    // the gun shop, the diner
     if (I.hit('KeyE') && this.atShop() && !this.myCar) this.openShop(true);
+    if (I.hit('KeyE') && this.atDiner()) this.link.send({ t: 'buy', item: 'meal' });
   }
 
   nearestCar() {
@@ -492,7 +556,45 @@ export class Game {
     }
     return best;
   }
-  atShop() { const G = PLACES.guns; return !this.myCar && !this.ride && Math.hypot(this.p.x - G.x, this.p.z - G.z) < 2.6; }
+  atShop() { const G = INTERIOR.guns.spots.shop; return !this.myCar && !this.ride && Math.hypot(this.p.x - G.x, this.p.z - G.z) < 1.6; }
+  atDiner() { const E = INTERIOR.diner.spots.eat; return !this.myCar && !this.ride && Math.hypot(this.p.x - E.x, this.p.z - E.z) < 1.4; }
+
+  // ------------------------------------------------------------ doors
+  // Walk into a door: a quick fade to black, and you're on the other side.
+  doors(dt) {
+    const p = this.p;
+    this.doorT = Math.max(0, this.doorT - dt);
+    if (this.myCar || this.ride || this.doorT > 0 || !this.alive()) return;
+    const R = this.room ? INTERIOR[this.room] : null;
+    const near = R ? [[R, R.exit, 'out']] : INTERIORS.map((q) => [q, q.door, 'in']);
+    let any = false;
+    for (const [room, at, way] of near) {
+      const d = Math.hypot(p.x - at.x, p.z - at.z);
+      if (d < 1.5) any = true;
+      if (d > 0.75 || !this.doorArmed) continue;
+      if (way === 'in' && this.me$.wanted > 0) { this.doorNote = 'The door won\'t open with the police after you.'; continue; }
+      this.goThrough(room, way);
+      return;
+    }
+    if (!any) { this.doorArmed = true; this.doorNote = null; }
+  }
+
+  goThrough(R, way) {
+    this.doorT = 0.9;
+    this.doorArmed = false;
+    this.fadeTo = 1;
+    sound.door();
+    setTimeout(() => {
+      const p = this.p;
+      const at = way === 'in' ? R.entry : { x: R.door.x + Math.sin(R.door.h) * 0.35, z: R.door.z + Math.cos(R.door.h) * 0.35, h: R.door.h };
+      Object.assign(p, { x: at.x, z: at.z, h: at.h, y: 0, vy: 0, speed: 0 });
+      this.camYaw = at.h + Math.PI;
+      this.camPitch = way === 'in' ? 0.28 : 0.18;
+      this.camDist = 1.2;
+      this.send();
+      this.fadeTo = 0;
+    }, 260);
+  }
 
   // ------------------------------------------------------------ on foot
   walk(dt) {
@@ -574,7 +676,7 @@ export class Game {
   // ------------------------------------------------------------ shooting
   combat(dt) {
     const I = this.input;
-    const canShoot = !this.locked() && !this.myCar && this.p.downT <= 0;
+    const canShoot = !this.locked() && !this.myCar && this.p.downT <= 0 && !this.room;
     this.aim = canShoot && I.buttons.has(2) && this.w !== 0;
     this.firing = false;
     if (!canShoot) return;
@@ -712,9 +814,9 @@ export class Game {
       v.update(dt, { pose: down ? ((flags & 3) === 2 ? 'hands' : 'collapse') : anim === 10 ? 'jump' : anim === 3 && w ? 'aim' : null, aimPitch: -ap * 0.8, y: groundY(v.x, v.z) + (s[3] || 0), smooth: 14 });
       void ay; void hp;
     }
-    // me
+    // me (the opening places me itself)
     const mv = this.myView;
-    if (this.myCar || this.ride) {
+    if (this.intro >= 0) { /* */ } else if (this.myCar || this.ride) {
       const id = this.myCar ? this.myCar.id : this.ride.id;
       const C = this.cars.get(id);
       const c = this.myCar ? this.myCar.c : C ? { x: C.view.x, z: C.view.z, h: C.view.h } : this.p;
@@ -729,11 +831,20 @@ export class Game {
       mv.update(dt, { pose, aimPitch: -this.camPitch * 0.9, y: (p.ground || 0) + p.y, smooth: 1000 });
       mv.speed = p.speed;
     }
-    // job givers
-    for (const g of this.givers.values()) g.update(dt, { y: groundY(g.x, g.z) });
+    // job givers, and the people behind the counters, in their rooms
+    const talking = this.talking && performance.now() / 1000 < this.talkUntil ? this.talking : null;
+    for (const [key, g] of this.givers) { g.root.visible = this.room === key; if (g.root.visible) g.update(dt, { y: groundY(g.x, g.z), pose: talking === key ? 'talk' : null }); }
+    for (const v of this.clerks) { v.root.visible = this.room === v.room; if (v.root.visible) v.update(dt, { y: groundY(v.x, v.z) }); }
+    // indoors, the street outside isn't drawn
+    if (this.room) {
+      for (const C of this.cars.values()) C.view.root.visible = false;
+      for (const P of this.peds.values()) P.view.root.visible = false;
+      for (const d of this.drivers.values()) d.root.visible = false;
+      for (const m of this.pickups.values()) m.visible = false;
+    } else for (const m of this.pickups.values()) m.visible = true;
     // pickups and markers turn and bob
     for (const m of this.pickups.values()) { const s = m.userData.spin; if (s) { s.rotation.y += dt * 2; s.position.y = 1 + Math.sin(t * 3) * 0.08; } }
-    for (const m of this.markers.values()) { const s = m.userData.spin; if (s) s.rotation.y += dt * 0.5; }
+    for (const m of this.markers.values()) { m.visible = this.intro < 0; const s = m.userData.spin; if (s) s.rotation.y += dt * 0.5; }
     this.updateArrows();
   }
 
@@ -748,6 +859,15 @@ export class Game {
     v.x = v.tx = px; v.z = v.tz = pz; v.h = v.th = h; v.fresh = false;
     v.anim = 0;
     v.update(dt, { pose: seat === 0 ? 'drive' : 'sit', y: (type === 'van' ? 0.55 : type === 'sports' ? 0.12 : 0.28), smooth: 1000 });
+    // keep their head under the roof, however tall they are (the low cars
+    // sit you lower)
+    const head = v.rig.skull || v.rig.head;
+    if (head) {
+      v.root.updateMatrixWorld(true);
+      const hy = head.getWorldPosition(SEAT_TMP).y;
+      const roof = T.ht - 0.2;
+      if (hy > roof) v.root.position.y -= Math.min(hy - roof, 0.5);
+    }
   }
 
   // arrows over the job's cars and targets
@@ -775,18 +895,16 @@ export class Game {
 
   placeCamera(dt) {
     const cam = this.camera;
-    // the opening: over the city
+    // the opening
     if (this.intro >= 0) {
-      const a = this.intro * 0.08;
-      cam.position.set(Math.cos(a) * 150, 70 - this.intro * 2.5, Math.sin(a) * 150 + 20);
-      cam.lookAt(0, 8, 0);
-      if (!this.introShown) this.hud.banner(TITLE, `Kingsgate · ${DATE} · Space to skip`, 'title');
-      this.introShown = true;
+      this.opening.update(dt, cam, sound, voice);
+      this.world.head.intensity = 0;
       return;
     }
-    if (this.introShown) { this.introShown = false; this.hud.banner(null); }
-    // a job's opening words: from the side, the two of you face to face
-    const giver = this.mission.cut && !this.myCar && !this.ride ? this.givers.get(this.mission.giver) : null;
+    // a job's opening words, in the giver's office: a wide shot of the two
+    // of you, then over the shoulder and close on whoever's talking, a cut
+    // on every line
+    const giver = this.mission.cut && !this.myCar && !this.ride && this.room === this.mission.giver ? this.givers.get(this.mission.giver) : null;
     if (giver) {
       const p = this.p;
       let dx = giver.x - p.x, dz = giver.z - p.z;
@@ -794,18 +912,36 @@ export class Game {
       dx /= l; dz /= l;
       p.h = Math.atan2(dx, dz);
       giver.th = Math.atan2(-dx, -dz);
+      const speakerIsGiver = !this.talking || this.talking !== 'you';
+      const sp = speakerIsGiver ? giver : p, ls = speakerIsGiver ? p : giver;
+      const tx = (speakerIsGiver ? -dx : dx), tz = (speakerIsGiver ? -dz : dz);   // from the speaker towards the listener
+      const shot = (this.cutLine || 1) % 3;
+      // which side has room (for the wide shot)
       const mx = (p.x + giver.x) / 2, mz = (p.z + giver.z) / 2;
-      let best = null;
-      for (const side of [1, -1]) {
-        const ox = -dz * side, oz = dx * side;
-        const hit = this.solids.ray(mx, 1.6, mz, ox, 0.1, oz, 5);
-        const room = hit ? hit.t : 5;
-        if (!best || room > best.room) best = { ox, oz, room };
+      let side = 1, room = 0;
+      for (const sd of [1, -1]) {
+        const hit = this.solids.ray(mx, 1.6, mz, -dz * sd, 0.1, dx * sd, 5);
+        const r = hit ? hit.t : 5;
+        if (r > room) { room = r; side = sd; }
       }
-      const r = Math.max(1.4, Math.min(4.2, best.room - 0.4));
-      cam.position.set(mx + best.ox * r - dx * 0.6, 1.7, mz + best.oz * r - dz * 0.6);
-      cam.lookAt(mx, 1.4, mz);
-      if (Math.abs(cam.fov - 50) > 0.1) { cam.fov = 50; cam.updateProjectionMatrix(); }
+      const ox = -dz * side, oz = dx * side;
+      let from, look, fov;
+      if (shot === 1) {
+        const r = Math.max(1.4, Math.min(4.2, room - 0.4));
+        from = [mx + ox * r - dx * 0.6, 1.7, mz + oz * r - dz * 0.6]; look = [mx, 1.4, mz]; fov = 50;
+      } else if (shot === 2) {
+        from = [ls.x + tx * 0.75 + ox * 0.5, 1.68, ls.z + tz * 0.75 + oz * 0.5]; look = [sp.x, 1.5, sp.z]; fov = 44;
+      } else {
+        from = [sp.x + tx * 1.35 - ox * 0.35, 1.6, sp.z + tz * 1.35 - oz * 0.35]; look = [sp.x, 1.55, sp.z]; fov = 36;
+      }
+      // (never through a wall)
+      const v = new THREE.Vector3(from[0] - look[0], from[1] - look[1], from[2] - look[2]), L = v.length();
+      v.divideScalar(L);
+      const hit = this.solids.ray(look[0], look[1], look[2], v.x, v.y, v.z, L);
+      const use = hit ? Math.max(0.5, hit.t - 0.25) : L;
+      cam.position.set(look[0] + v.x * use, look[1] + v.y * use, look[2] + v.z * use);
+      cam.lookAt(look[0], look[1], look[2]);
+      if (Math.abs(cam.fov - fov) > 0.1) { cam.fov = fov; cam.updateProjectionMatrix(); }
       this.world.head.intensity = 0;
       return;
     }
@@ -860,7 +996,7 @@ export class Game {
     const H = this.world.head;
     if (this.myCar || this.ride) {
       const c = me;
-      H.intensity = 15;
+      H.intensity = 15 * this.world.sunState.night;
       H.position.set(c.x + Math.sin(c.h) * 2, 0.9, c.z + Math.cos(c.h) * 2);
       H.target.position.set(c.x + Math.sin(c.h) * 14, 0, c.z + Math.cos(c.h) * 14);
     } else H.intensity = 0;
@@ -875,10 +1011,9 @@ export class Game {
     H.weapon(W, ammo < 0 ? 0 : ammo, Math.min(clip, Math.max(0, ammo)), this.T < this.reloadUntil);
     H.wanted(M.wanted, M.searching);
     H.crosshair(!this.locked() && (this.aim || (this.ride && W !== 0)), false);
-    // the clock: 10 PM, a minute a second, round and round the night
-    const mins = (22 * 60 + Math.floor(this.T)) % (8 * 60);
-    const hh = (22 + Math.floor(mins / 60)) % 24, mm = mins % 60;
-    H.clock(`${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`);
+    H.clock(clockText(hourAt(this.T)));
+    if (!this.mission.active && this.intro < 0) H.mission(this.tutorialText() || '');
+    this.cutFade = Math.max(0, (this.cutFade || 0) - dt * 2.2);
     // which part of town
     this.areaT -= dt;
     if (this.areaT <= 0) {
@@ -890,7 +1025,10 @@ export class Game {
     // a hint of what you can do here
     let help = null;
     if (!this.locked()) {
-      if (this.atShop()) help = 'Press ~y~E~w~ to buy guns and armour.';
+      if (this.doorNote) help = this.doorNote;
+      else if (this.atShop()) help = 'Press ~y~E~w~ to buy guns and armour.';
+      else if (this.atDiner()) help = `Press ~y~E~w~ for a meal ($${PRICES.meal}). It puts you back to full health.`;
+      else if (this.room === 'home' && Math.hypot(this.p.x - INTERIOR.home.spots.save.x, this.p.z - INTERIOR.home.spots.save.z) < 1.6) help = 'Walk up to your bed to save the game.';
       else if (!this.myCar && !this.ride && this.nearestCar()) help = 'Press ~y~F~w~ to get in.';
       else if (this.myCar && this.myCar.c.type === 'police') help = '~y~G~w~ siren · ~y~H~w~ horn · ~y~R~w~ radio';
       else if (this.helpQueue.length && this.T > 2) {
@@ -907,12 +1045,14 @@ export class Game {
       if (n !== this.lastCount) { this.lastCount = n; H.countdown(n == null ? null : n > 3 ? null : n); if (n != null && n <= 3) sound.jingle(n === 'GO!' ? 'go' : 'count'); }
       if (n == null) this.countAt = null;
     }
-    // the radar (and the map, if it's open)
-    const me = this.pos();
+    // the radar (and the map, if it's open): indoors, where the building is
+    const me = this.room ? { x: INTERIOR[this.room].door.x, z: INTERIOR[this.room].door.z, h: this.p.h } : this.pos();
     const blips = [];
     for (const b of this.mission.blips || []) {
       if (b.car != null) { const C = this.cars.get(b.car); if (C) blips.push({ x: C.view.x, z: C.view.z, k: b.k }); } else if (b.ped != null) { const P = this.peds.get(b.ped); if (P) blips.push({ x: P.view.x, z: P.view.z, k: b.k }); } else blips.push(b);
     }
+    // your own car (unless you're in it)
+    if (M.ownCar >= 0 && !(this.myCar && this.myCar.id === M.ownCar)) { const C = this.cars.get(M.ownCar); if (C && !(C.flags & 8)) blips.push({ x: C.view.x, z: C.view.z, k: 'mycar', h: C.view.h }); }
     const players = [{ x: me.x, z: me.z, h: me.h ?? this.p.h, me: true, color: this.myColor }];
     for (const O of this.others.values()) players.push({ x: O.view.x, z: O.view.z, h: O.view.h, color: O.color });
     const police = [];
@@ -990,7 +1130,7 @@ export class Game {
     const down = !this.alive();
     f.saturation += ((down ? 0.15 : 1) - f.saturation) * 0.05;
     f.bars += ((this.mission.cut || this.intro >= 0 ? 1 : 0) - f.bars) * 0.08;
-    f.fade = this.intro >= 0 ? Math.max(0, 1 - this.intro * 0.8) : 0;
+    f.fade = Math.max(this.intro >= 0 ? this.opening.fade || 0 : 0, this.doorFade || 0, this.cutFade || 0);
     f.fear = Math.min(0.6, (this.me$.wanted || 0) * 0.04);
     return f;
   }
@@ -1008,7 +1148,7 @@ export class Game {
     for (const P of this.peds.values()) P.view.dispose();
     for (const O of this.others.values()) O.view.dispose();
     for (const m of [...this.pickups.values(), ...this.objects.values(), ...this.markers.values(), ...this.arrows]) m.removeFromParent();
-    for (const g of [...this.givers.values(), ...this.drivers.values()]) g.dispose();
+    for (const g of [...this.givers.values(), ...this.drivers.values(), ...this.clerks]) g.dispose();
     this.myView.dispose();
     this.fx.dispose();
     this.world.head.intensity = 0;

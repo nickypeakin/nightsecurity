@@ -67,7 +67,8 @@ export class Radar {
     const flash = Math.floor(t * 4) % 2;
     for (const p of police || []) put(p.x, p.z, (g, s) => { g.fillStyle = flash ? '#ff3030' : '#3060ff'; g.beginPath(); g.arc(0, 0, 3.4 * s, 0, 7); g.fill(); });
     for (const b of blips || []) {
-      if (b.k === 'giver') put(b.x, b.z, (g, s) => icon(g, s, b.l, b.c, 9), true);
+      if (b.k === 'mycar') put(b.x, b.z, (g, s) => carIcon(g, s, 1), true);
+      else if (b.k === 'giver') put(b.x, b.z, (g, s) => icon(g, s, b.l, b.c, 9), true);
       else put(b.x, b.z, (g, s) => { g.fillStyle = BLIP[b.k] || '#ffd040'; g.strokeStyle = '#000'; g.lineWidth = 1.5 * s; g.beginPath(); g.arc(0, 0, (b.k === 'check2' ? 3.5 : 5) * s, 0, 7); g.fill(); g.stroke(); }, b.k !== 'enemy' || true);
     }
     for (const p of players || []) {
@@ -140,6 +141,7 @@ export class Radar {
       const [px, py] = P(b.x, b.z);
       ctx.save(); ctx.translate(px, py);
       if (b.k === 'giver') icon(ctx, dpr * 1.4, b.l, b.c, 9);
+      else if (b.k === 'mycar') carIcon(ctx, dpr, 1.4);
       else { ctx.fillStyle = BLIP[b.k] || '#ffd040'; ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 6 * dpr, 0, 7); ctx.fill(); ctx.stroke(); }
       ctx.restore();
     }
@@ -154,6 +156,16 @@ export class Radar {
     }
     void x; void z; void h;
   }
+}
+
+// your car: a blue arrowhead with a white edge
+function carIcon(g, s, k) {
+  g.fillStyle = '#4aa8ff';
+  g.strokeStyle = '#fff';
+  g.lineWidth = 1.6 * s;
+  g.beginPath();
+  g.moveTo(0, -7 * s * k); g.lineTo(6 * s * k, 6 * s * k); g.lineTo(-6 * s * k, 6 * s * k); g.closePath();
+  g.fill(); g.stroke();
 }
 
 // a round icon with a letter

@@ -5,6 +5,7 @@
 
 import { MISSIONS, PEOPLE } from '../shared/story.js';
 import { PLACES } from '../shared/city.js';
+import { INTERIOR, GIVER_ROOMS } from '../shared/interiors.js';
 import { WEAPON_INDEX, WEAPONS } from '../shared/config.js';
 import { makePed, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2, A } from './peds.js';
 import { Driver } from './drivers.js';
@@ -22,12 +23,13 @@ export class Missions {
 
   get next() { return MISSIONS[this.done] || null; }
 
-  // where the next job starts
+  // where the next job starts: in front of the giver's desk (and, for the
+  // radar, their front door)
   marker() {
     const n = this.next;
     if (!n || this.active) return null;
-    const p = PLACES[n.giver] || PLACES[{ okafor: 'okafor', voss: 'voss', dale: 'dale' }[n.giver]];
-    return { x: p.x, z: p.z, giver: n.giver };
+    const R = INTERIOR[GIVER_ROOMS[n.giver]];
+    return { x: R.spots.job.x, z: R.spots.job.z, giver: n.giver, door: R.door };
   }
 
   changed() { this.version++; }
@@ -170,11 +172,12 @@ export class Missions {
         const ids = [];
         for (let k = 0; k < st.n; k++) {
           // among the containers, out of the way
-          let x = st.at.x, z = st.at.z;
-          for (let tries = 0; tries < 30; tries++) {
+          let x = st.at.x, z = st.at.z, ok = false;
+          for (let tries = 0; tries < 60 && !ok; tries++) {
             x = st.at.x + (m.rng() - 0.5) * 70; z = st.at.z - 2 - m.rng() * 18;
-            if (m.openAt(x, z, 0.5) && !m.anyoneSees(x, 1.2, z)) break;
+            ok = m.openAt(x, z, 0.5) && (tries > 40 || !m.anyoneSees(x, 1.2, z));
           }
+          if (!ok) { x = st.at.x + (k - st.n / 2) * 1.5; z = st.at.z - 4; }
           const p = makePed('mq', x, z, k % 2 ? LOOK_MQ : LOOK_MQ2);
           p.hp = 9999;
           p.group = st.group;
@@ -383,7 +386,7 @@ export class Missions {
     const m = this.m, A0 = this.active;
     const blips = [];
     const mk = this.marker();
-    if (mk) blips.push({ x: mk.x, z: mk.z, k: 'giver', l: PEOPLE[mk.giver].blip, c: PEOPLE[mk.giver].color });
+    if (mk) blips.push({ x: mk.door.x, z: mk.door.z, k: 'giver', l: PEOPLE[mk.giver].blip, c: PEOPLE[mk.giver].color, ix: mk.x, iz: mk.z });
     if (!A0) return { title: '', text: '', blips, cut: false, active: false };
     const st = A0.def.steps[A0.idx];
     const car = (id) => m.cars.get(A0.cars[id]);

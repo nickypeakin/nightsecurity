@@ -1,6 +1,6 @@
-// Everything anyone says, and the jobs. October 1996: Kingsgate Mall is a
+// Everything anyone says, and the jobs. November 1996: Kingsgate Mall is a
 // fenced-off pile of rubble, the night shift that used to guard it is out
-// of work, and the city's still awake. Three people have jobs for you:
+// of work, and the city's wide awake. Three people have jobs for you:
 // Ray Okafor (who managed the mall, and sells used cars now), Lena Voss
 // (who runs the harbour, and more than the harbour), and Dale Mercer (the
 // old night guard, who never quite got over that last week at the mall).
@@ -11,7 +11,7 @@
 import { PLACES, BUILDINGS, LINES, PARK } from './city.js';
 
 export const DATE = 'Friday, November 1, 1996';
-export const TITLE = 'KINGSGATE NIGHTS';
+export const TITLE = 'GTA 7';
 
 export const PEOPLE = {
   okafor: { name: 'Ray Okafor', voice: 'okafor', blip: 'O', color: '#7ad0ff' },
@@ -34,17 +34,17 @@ const RACE = [[80, 40], [40, 78], [-20, 120], [-120, 96], [-120, 0], [-80, -40],
 
 export const MISSIONS = [
   {
-    id: 'm1', giver: 'okafor', title: 'Night Work', pay: 250,
+    id: 'm1', giver: 'okafor', title: 'Back to Work', pay: 250,
     steps: [
       { do: 'say', lines: [
-        ['okafor', "Look who it is. The mall's gone, the job's gone, and you're standing on my lot at midnight."],
+        ['okafor', "Good, you came. The mall's gone, the job's gone, and here you are in my office. Sit down."],
         ['okafor', "A customer stopped paying for his Marlin. It's parked on Ash Street, outside the shops on the Strip."],
-        ['okafor', 'Bring it back here. Quietly.'],
+        ['okafor', 'Bring it back to the lot. Quietly.'],
       ] },
       { do: 'car', id: 'repo', type: 'sedan', paint: 1, at: kerbZ(40, 92, 1) },
       { do: 'enter', car: 'repo', text: 'Get in the ~b~Marlin~w~ on the Strip.' },
       { do: 'deliver', car: 'repo', at: OKAFOR_LOT, r: 6, text: "Take it to ~y~Okafor's Motors~w~." },
-      { do: 'say', lines: [['okafor', 'Not a scratch. Well. A few scratches. Come back tomorrow night.']] },
+      { do: 'say', lines: [['okafor', 'Not a scratch. Well. A few scratches. Come and see me again.']] },
     ],
   },
   {
@@ -103,7 +103,7 @@ export const MISSIONS = [
     id: 'm5', giver: 'okafor', title: 'Checkpoint', pay: 1500,
     steps: [
       { do: 'say', lines: [
-        ['okafor', "Kids race my cars round the city at night. One of them bet me I couldn't find a driver to beat them."],
+        ['okafor', "Kids race my cars round the city when they think I'm not looking. One of them bet me I couldn't find a driver to beat them."],
         ['okafor', "Take the Kestrel. Through every checkpoint, first. Don't make me pay that boy."],
       ] },
       { do: 'car', id: 'racer', type: 'sports', paint: 8, at: { x: 150, z: 44.9, h: -Math.PI / 2 } },

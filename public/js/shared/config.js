@@ -3,7 +3,7 @@
 export const MAX_PLAYERS = 4;
 export const PEER_PREFIX = 'gsgs-kingsgate-city-';
 // bump whenever host and guest messages change: mismatched copies refuse to mix
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 // the host runs the city 20 times a second and tells everyone 10 times
 export const TICK = 1 / 20;
@@ -52,8 +52,28 @@ export const WANTED = {
   arrest: 2.2,                       // seconds a cop has to hold you
 };
 
-export const PRICES = { armor: 250, respray: 100, hospital: 100, busted: 150 };
+export const PRICES = { armor: 250, respray: 100, hospital: 100, busted: 150, meal: 15 };
 
 // pedestrians and cops
 export const PED = { r: 0.3, walk: 1.35, run: 5.2, hp: 40 };
 export const COP = { r: 0.3, run: 5.6, hp: 90, sight: 45, fov: 1.2 };
+
+// The clock. A day takes DAY_LEN real seconds (a game minute every two
+// seconds) and every game starts at START_HOUR in the morning. sunAt says
+// how high the sun is and how much of day and night it is: `day` 1 in full
+// daylight, `night` 1 once the street lamps are fully on.
+export const DAY_LEN = 2880;
+export const START_HOUR = 8;
+export const hourAt = (t) => (((START_HOUR + (t * 24) / DAY_LEN) % 24) + 24) % 24;
+const smooth = (a, b, x) => { const k = Math.max(0, Math.min(1, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+export function sunAt(h) {
+  // up at 6, highest at 1 in the afternoon, down at 8 in the evening
+  const up = h >= 6 && h <= 20;
+  const k = up ? (h - 6) / 14 : ((h + 4) % 24) / 10;
+  const elev = up ? Math.sin(Math.PI * k) * 0.92 : -Math.sin(Math.PI * k) * 0.5;
+  return { k, up, elev, day: smooth(-0.06, 0.14, elev), night: 1 - smooth(-0.1, 0.06, elev), warm: up ? 1 - smooth(0.04, 0.42, elev) : 0 };
+}
+export function clockText(h) {
+  const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+  return `${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`;
+}

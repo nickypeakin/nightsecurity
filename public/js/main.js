@@ -1,8 +1,8 @@
-// Start-up and menu flow: title screen, continue / new game / host / join,
+// Start-up and menu flow: GTA 7's title screen, continue / new game / host / join,
 // the lobby, the city itself, pause, saving.
 
 import * as THREE from 'three';
-import { CITY_UNIFORMS } from './client/lighting.js';
+import './client/lighting.js';
 import { Post } from './client/post.js';
 import { Input } from './client/input.js';
 import { Hud, showScreen, screenShown, renderLobby, setMsg } from './client/ui.js';
@@ -30,6 +30,18 @@ const post = new Post(renderer);
 const input = new Input(canvas);
 const hud = new Hud();
 // building the city takes a moment: say so before the page goes quiet
+const TIPS = [
+  'Your car is parked outside your place. If it gets wrecked, a new one turns up there.',
+  'Walk into a glowing door to go inside. Your bed saves the game.',
+  "Hurt? A meal at Sal's Diner on the Strip puts you right for $15.",
+  'Lose the police by getting out of their sight, or drive into Spray-N-Go.',
+  'Kingsgate Arms on the Strip sells pistols, SMGs, shotguns and body armour.',
+  'Thirteen security tapes from the old mall are hidden round the city. Each one pays $250.',
+  'Hold Space while driving for the handbrake. It helps round corners.',
+  'Press M for the map. The big letters are the people with work for you.',
+];
+const showTip = () => { $('loadTip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)]; };
+showTip();
 showScreen('loading');
 await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
 const world = new City();
@@ -61,13 +73,13 @@ $('voices').checked = settings.voices;
 $('vhs').checked = settings.vhs;
 $('sens').addEventListener('input', (e) => { settings.sens = +e.target.value; save(); });
 $('vol').addEventListener('input', (e) => { settings.vol = +e.target.value; sound.setVolume(settings.vol); voice.volume = settings.vol; save(); });
-$('bright').addEventListener('input', (e) => { settings.bright = +e.target.value; CITY_UNIFORMS.cityScale.value = settings.bright; save(); });
+$('bright').addEventListener('input', (e) => { settings.bright = +e.target.value; world.bright = settings.bright; world.setTime(world.hour); save(); });
 $('invert').addEventListener('change', (e) => { settings.invert = e.target.checked; save(); });
 $('voices').addEventListener('change', (e) => { settings.voices = e.target.checked; voice.enabled = settings.voices; if (!settings.voices) voice.stop(); save(); });
 $('vhs').addEventListener('change', (e) => { settings.vhs = e.target.checked; post.grainOn = settings.vhs; save(); });
 $('graphics').value = settings.graphics;
 $('graphics').addEventListener('change', (e) => { settings.graphics = e.target.value; save(); applyGraphics(); });
-CITY_UNIFORMS.cityScale.value = settings.bright;
+world.bright = settings.bright;
 
 const invited = (params.get('join') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
 if (invited) $('code').value = invited;
@@ -202,7 +214,9 @@ function wire(l) {
     showInvite(m);
   });
   l.on('status', (m) => { if (l === link && !game) setMsg(l.isHost ? 'lobbyMsg' : guestMsgId(), m.text); });
-  l.on('start', (m) => { if (l === link) startGame(m); });
+  // (the loading screen gets a frame to show before the city's people and
+  // cars are built)
+  l.on('start', (m) => { if (l !== link) return; showTip(); showScreen('loading'); setTimeout(() => { if (l === link) startGame(m); }, 60); });
   l.on('save', (m) => { if (l === link && l.isHost) storeGame(m.data); });
   l.on('closed', (m) => { if (l === link) { leave(); setMsg('titleMsg', m.text); } });
   l.on('neterror', (m) => { if (l === link) setMsg('lobbyMsg', m.text); });
@@ -228,7 +242,9 @@ const actions = {
   host() {
     begin();
     solo = false;
-    link = new HostLink(playerName(), { online: true, startAt: 'skip', save: loadGame() });
+    // (carrying on from your save if you have one; the opening if not)
+    const saved = loadGame();
+    link = new HostLink(playerName(), { online: true, startAt: saved ? 'skip' : startAt, save: saved });
     wire(link);
     showScreen('lobby');
   },
@@ -279,7 +295,7 @@ const actions = {
     else if (document.execCommand('copy')) done();
   },
   share() {
-    navigator.share?.({ title: 'Kingsgate Nights', text: 'Come and cause trouble in Kingsgate with me.', url: $('inviteLink').value }).catch(() => {});
+    navigator.share?.({ title: 'GTA 7', text: 'Come and cause trouble in Kingsgate with me.', url: $('inviteLink').value }).catch(() => {});
   },
   start() { link?.send({ t: 'start' }); },
   leave: () => leave(),
@@ -319,6 +335,47 @@ document.addEventListener('click', (e) => {
   if (b && actions[b.dataset.act]) actions[b.dataset.act]();
 });
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') actions.join(); });
+
+// ----------------------------------------------------------- main menu --
+// The list on the left picks a card on the right; the arrow keys move
+// through whichever you're in, Enter chooses, Esc goes back to the list.
+const menuItems = [...document.querySelectorAll('#mmList .mi')];
+function pickCard(name, focus = false) {
+  for (const b of menuItems) b.classList.toggle('on', b.dataset.card === name);
+  for (const c of document.querySelectorAll('.mm-card')) c.hidden = c.id !== `card-${name}`;
+  if (focus) cardButtons()[0]?.focus();
+}
+const cardButtons = () => [...document.querySelectorAll('.mm-card:not([hidden]) button:not([hidden]), .mm-card:not([hidden]) input')];
+for (const b of menuItems) {
+  b.addEventListener('mouseenter', () => { pickCard(b.dataset.card); sound.click(); });
+  b.addEventListener('focus', () => pickCard(b.dataset.card));
+  b.addEventListener('click', () => {
+    if (b.dataset.card === 'settings') actions.settings();
+    else if (b.dataset.card === 'help') actions.help();
+    else pickCard(b.dataset.card, true);
+  });
+}
+addEventListener('keydown', (e) => {
+  if (!screenShown('title')) return;
+  const inCard = document.activeElement && document.activeElement.closest('.mm-card');
+  const list = inCard ? cardButtons() : menuItems;
+  const typing = document.activeElement && document.activeElement.tagName === 'INPUT';
+  let i = list.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (i < 0) i = inCard ? -1 : Math.max(0, menuItems.findIndex((b) => b.classList.contains('on')));
+    i = (i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length;
+    list[i].focus();
+    sound.click();
+  } else if (e.key === 'ArrowRight' && !inCard && !typing) {
+    const on = menuItems.find((b) => b.classList.contains('on'));
+    if (on) on.click();
+  } else if ((e.key === 'Escape' || (e.key === 'ArrowLeft' && !typing)) && inCard) {
+    (menuItems.find((b) => b.classList.contains('on')) || menuItems[0]).focus();
+  } else if (e.key === 'Enter' && !inCard && i < 0) {
+    (menuItems.find((b) => b.classList.contains('on')) || menuItems[0]).click();
+  }
+});
 
 // ---------------------------------------------------------------- game --
 function startGame(m) {

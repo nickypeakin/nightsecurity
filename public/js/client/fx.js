@@ -185,7 +185,7 @@ export class Fx {
 }
 
 // ------------------------------------------------------------- markers
-const MARKER_COL = { giver: 0xffd040, dest: 0xffd040, check: 0xff4040, check2: 0x803030, pickup: 0x40ff60, shop: 0x60c0ff, save: 0x60ff9a };
+const MARKER_COL = { giver: 0xffd040, dest: 0xffd040, check: 0xff4040, check2: 0x803030, pickup: 0x40ff60, shop: 0x60c0ff, save: 0x60ff9a, eat: 0xffa040, door: 0xfff0a0 };
 const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 32, 1, true);
 // a glowing ring of light on the ground (job markers, checkpoints)
 export function makeMarker(kind, r = 1.4) {

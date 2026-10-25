@@ -209,15 +209,17 @@ export class CarView {
     this.roll += (lean - this.roll) * Math.min(1, dt * 5);
     this.root.rotation.z = this.roll;
     for (const w of this.wheels) w.rotation.y = -steer;
-    const lights = (flags & 2) !== 0, dead = (flags & 8) !== 0;
+    // headlights after dark (CarView.night: how dark it is, 0-1)
+    const dead = (flags & 8) !== 0, N = CarView.night;
+    const lights = (flags & 2) !== 0 && N > 0.15;
     const G = this.lampMat.uniforms.glow.value;
-    G.x = lights && !dead ? 2.4 : 0;
-    G.y = dead ? 0 : v < -0.2 || this.braking ? 2.2 : lights ? 0.9 : 0.25;
+    G.x = lights && !dead ? 2.4 * N : 0;
+    G.y = dead ? 0 : v < -0.2 || this.braking ? 2.2 : lights ? 0.25 + 0.65 * N : 0.25;
     const on = (flags & 1) !== 0 && !dead, ph = Math.floor(t * 6) % 2;
     G.z = on && ph === 0 ? 4 : 0;
     G.w = on && ph === 1 ? 4 : 0;
     this.lampMat.uniforms.signGlow.value = dead ? 0 : 1.6;
-    this.beam.visible = lights && !dead && this.near;
+    this.beam.visible = lights && !dead && this.near && N > 0.5;
     if (dead && !this.wrecked) {
       this.wrecked = true;
       this.body.material = MATS.burnt;
@@ -229,6 +231,7 @@ export class CarView {
 
   dispose() { this.root.removeFromParent(); this.lampMat.dispose(); }
 }
+CarView.night = 0;
 
 export function prewarmCars(scene) {
   const g = new THREE.Group();

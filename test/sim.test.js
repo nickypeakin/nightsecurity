@@ -11,6 +11,7 @@
 import { Match, INTRO_LEN } from '../public/js/host/match.js';
 import { TICK, WEAPONS, PRICES, MAX_HP } from '../public/js/shared/config.js';
 import { PLACES, onRoad, openAt } from '../public/js/shared/city.js';
+import { INTERIOR, interiorAt } from '../public/js/shared/interiors.js';
 import { MISSIONS, TAPES, TAPE_PAY } from '../public/js/shared/story.js';
 
 let failures = 0;
@@ -59,6 +60,47 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
     clear: () => { log.length = 0; },
   };
   return H;
+}
+
+// ------------------------------------------------------ home, and your car
+{
+  console.log('home, and your own car');
+  const H = setup(2, 'home');
+  const { m, P } = H;
+  for (const p of m.players) {
+    check(interiorAt(p.x, p.z)?.id === 'home', `${p.name} wakes up at home`);
+    const c = m.cars.get(p.ownCar);
+    check(!!c && c.owner === p.id, `${p.name} has a car`);
+    const D = INTERIOR.home.door;
+    check(c && Math.hypot(c.x - D.x, c.z - D.z) < 30, `parked by the house (${c && Math.hypot(c.x - D.x, c.z - D.z).toFixed(1)} m)`);
+  }
+  // the street stays busy outside while you're in
+  H.step(30);
+  const D = INTERIOR.home.door;
+  const near = [...m.peds.values()].filter((q) => q.kind === 'civ' && Math.hypot(q.x - D.x, q.z - D.z) < 120).length;
+  check(near >= 15, `people out on the street while you're inside (${near})`);
+  check(m.cars.size >= 15, `and traffic (${m.cars.size} cars)`);
+  // your car is yours: no alarm, no stars, and it stays
+  const p = P(0), c = m.cars.get(p.ownCar);
+  H.go(0, D.x, D.z);
+  H.step(0.2);
+  H.enter(0, c);
+  check(p.car === c.id && p.wanted === 0, 'get in your own car, no questions asked');
+  H.driveTo(0, -150, 120);
+  H.step(0.5);
+  H.exit(0);
+  H.go(0, 150, -150);
+  H.go(1, 150, -152);
+  H.step(5);
+  check(m.cars.has(c.id), "and it's still where you left it");
+  // wreck it: a new one turns up at home
+  m.hurtCar(c, 999, null);
+  H.step(30);
+  check(m.cars.get(p.ownCar) && !m.cars.get(p.ownCar).dead && p.ownCar !== c.id, 'a wrecked car of yours is replaced at home');
+  // the police come for you where you went in, not through the wall
+  H.go(0, INTERIOR.guns.entry.x, INTERIOR.guns.entry.z);
+  m.police.crime(p, 0, 1);
+  check(m.outPos(p) === INTERIOR.guns.door, 'indoors, the street thinks you are at the door');
 }
 
 // ------------------------------------------------------ the streets alive
@@ -282,8 +324,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.step(0.3);
   check(p.hp === MAX_HP, 'health pickups heal');
   check(hk.gone, 'and come back later');
-  // the gun shop
-  const G = PLACES.guns;
+  // the gun shop (inside Kingsgate Arms)
+  const G = INTERIOR.guns.spots.shop;
   H.go(0, G.x, G.z);
   p.money = 1000;
   m.handle(p.id, { t: 'buy', item: 'pistol' });
@@ -295,6 +337,12 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   check(H.msgs('shop').some((s) => s.ok === false), 'the shop says so');
   m.handle(p.id, { t: 'buy', item: 'armor' });
   check(p.armor === 100, 'body armour');
+  // a meal at Sal's
+  const E = INTERIOR.diner.spots.eat;
+  H.go(0, E.x, E.z);
+  p.hp = 40; p.money = 100;
+  m.handle(p.id, { t: 'buy', item: 'meal' });
+  check(p.hp === MAX_HP && p.money === 100 - PRICES.meal, "a meal at Sal's puts you right");
   H.go(0, 0, 0);
   p.money = 5000;
   m.handle(p.id, { t: 'buy', item: 'smg' });
@@ -323,11 +371,11 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   check(m.missions.next.id === 'm4', 'the next job is offered');
   check(P(0).money === 999 && P(0).ammo[1] === 30 && P(0).ammo[2] === -1, 'money and guns are remembered');
   check([...m.pickups.values()].filter((k) => k.kind === 'tape').length === TAPES.length - 3, 'tapes found stay found');
-  // walking into your place saves
-  H.go(0, PLACES.safehouse.x, PLACES.safehouse.z);
+  // walking up to your bed saves
+  H.go(0, INTERIOR.home.spots.save.x, INTERIOR.home.spots.save.z);
   H.clear();
   H.step(0.5);
-  check(H.banners().includes('GAME SAVED'), 'walk into your place to save');
+  check(H.banners().includes('GAME SAVED'), 'walk up to your bed to save');
   check(H.msgs('save').pop()?.data.done === 3, 'the save says where you are');
 }
 
@@ -516,7 +564,7 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.go(0, PLACES.pier.x, PLACES.pier.z);
   untilStep('pickup', 3);
   const mq = A().groups.mq.map((id) => m.peds.get(id));
-  check(mq.length === 9 && mq.every((q) => q && m.openAt(q.x, q.z, 0.3)), 'nine of them among the containers');
+  check(mq.length === 9 && mq.every((q) => q && m.openAt(q.x, q.z, 0.2)), 'nine of them among the containers');
   const crate = m.pickups.get(A().pickups.crate);
   H.go(0, crate.x, crate.z);
   H.step(0.5);

@@ -1,7 +1,7 @@
 {
-  "name": "kingsgate-nights",
+  "name": "gta-7",
   "version": "1.0.0",
-  "description": "An open-world, GTA-style crime game in the browser, for up to four friends: steal cars, outrun the police, and take jobs around the city of Kingsgate at night.",
+  "description": "GTA 7: a fan-made open-world crime game in the browser, for up to four friends: steal cars, outrun the police, and take jobs around the city of Kingsgate.",
   "type": "module",
   "private": true,
   "scripts": {
@@ -14,6 +14,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource/anton": "5.2.7",
     "@fontsource/bebas-neue": "5.3.0",
     "@fontsource/inter": "5.1.0",
     "@fontsource/special-elite": "5.1.0",

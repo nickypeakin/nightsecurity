@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kingsgate Nights</title>
-  <meta name="description" content="An open-world crime game in your browser, for up to four friends. Steal cars, outrun the police, take jobs from the people who run the city of Kingsgate, all night long.">
+  <title>GTA 7</title>
+  <meta name="description" content="GTA 7: a fan-made open-world crime game in your browser, for up to four friends. Steal cars, outrun the police and take jobs from the people who run the city of Kingsgate.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23080a12'/%3E%3Cpath d='M8 56V30h8v26M20 56V14h12v42M36 56V24h10v32M50 56V36h6v20' fill='%23232a3a'/%3E%3Cpath d='M22 20h3v3h-3zM27 26h3v3h-3zM38 30h3v3h-3zM22 34h3v3h-3z' fill='%23ffc060'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/anton/latin-400.css">
   <link rel="stylesheet" href="vendor/bebas-neue/latin-400.css">
   <link rel="stylesheet" href="vendor/special-elite/latin-400.css">
   <link rel="stylesheet" href="vendor/inter/latin-400.css">
@@ -45,35 +46,63 @@
     <div id="shop" hidden></div>
     <div id="mapScreen" hidden>
       <canvas id="mapCanvas"></canvas>
-      <p class="legend"><span class="y">●</span> job · <span class="b">●</span> car · <span class="r">●</span> target · H hospital · P police · ⌖ guns · S Spray-N-Go · ⌂ your place · M to close</p>
+      <p class="legend"><span class="y">●</span> job · <span class="b">▲</span> your car · <span class="r">●</span> target · H hospital · P police · ⌖ guns · S Spray-N-Go · ⌂ your place · M to close</p>
     </div>
   </div>
 
   <div id="screens">
     <section id="title" class="screen">
-      <div class="logo">
-        <small class="pre">KINGSGATE · NOVEMBER 1996</small>
-        <h1>KINGSGATE<br>NIGHTS</h1>
-        <p class="tag">The mall's gone. The city's still awake.</p>
+      <div class="brand">
+        <div class="logo" aria-label="GTA 7"><span class="gta">GTA</span><span class="seven">7</span></div>
+        <p class="tag">KINGSGATE · 1996</p>
       </div>
-      <div class="menu">
-        <label class="field">YOUR NAME <input id="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
-        <button data-act="continue" id="continueBtn" hidden>CONTINUE <small></small></button>
-        <button data-act="solo">NEW GAME <small>play alone</small></button>
-        <button data-act="host">HOST A GAME <small>play online with up to 3 friends</small></button>
-        <label class="field">GOT A CODE FROM A FRIEND?</label>
-        <div class="join">
-          <input id="code" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
-          <button data-act="join">JOIN</button>
+      <div class="mm">
+        <nav class="mm-list" id="mmList">
+          <button class="mi on" data-card="story">STORY MODE</button>
+          <button class="mi" data-card="online">ONLINE</button>
+          <button class="mi" data-card="settings">SETTINGS</button>
+          <button class="mi" data-card="help">HOW TO PLAY</button>
+        </nav>
+        <div class="mm-card" id="card-story">
+          <h3>STORY MODE</h3>
+          <p>You wake up in Kingsgate Heights with your car out front and the phone ringing. Seven jobs for the people who run this city, thirteen lost tapes, and all of Kingsgate to get into trouble in.</p>
+          <button data-act="continue" id="continueBtn" class="opt" hidden>CONTINUE <small></small></button>
+          <button data-act="solo" class="opt">NEW GAME <small>from the beginning</small></button>
         </div>
-        <div class="row">
-          <button class="small" data-act="help">HOW TO PLAY</button>
-          <button class="small" data-act="settings">SETTINGS</button>
-          <button class="small" data-act="nettest">TEST CONNECTION</button>
+        <div class="mm-card" id="card-online" hidden>
+          <h3>ONLINE</h3>
+          <p>Play the story together, up to four of you. Whoever hosts runs the city in their browser, so keep that tab open.</p>
+          <label class="field">YOUR NAME <input id="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
+          <button data-act="host" class="opt">HOST A GAME <small>get a code for your friends</small></button>
+          <label class="field">GOT A CODE FROM A FRIEND?</label>
+          <div class="join">
+            <input id="code" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
+            <button data-act="join">JOIN</button>
+          </div>
+          <button class="opt small" data-act="nettest">TEST CONNECTION <small>if friends can't get in</small></button>
         </div>
-        <p id="titleMsg" class="msg"></p>
+        <div class="mm-card" id="card-settings" hidden>
+          <h3>SETTINGS</h3>
+          <p>Mouse sensitivity, volume, brightness, spoken voices and graphics quality.</p>
+          <button data-act="settings" class="opt">OPEN SETTINGS</button>
+        </div>
+        <div class="mm-card" id="card-help" hidden>
+          <h3>HOW TO PLAY</h3>
+          <div class="keys">
+            <b>WASD</b><span>walk, run (Shift), drive</span>
+            <b>F</b><span>get in or out of a car, or steal one</span>
+            <b>MOUSE</b><span>look · right to aim · left to shoot</span>
+            <b>E</b><span>shop and eat when you're at the counter</span>
+            <b>M</b><span>the map</span>
+          </div>
+          <button data-act="help" class="opt">ALL THE CONTROLS</button>
+        </div>
       </div>
-      <p class="fine">Everything you see and hear is made in code. Headphones help.</p>
+      <p id="titleMsg" class="msg"></p>
+      <div class="mm-foot">
+        <span><kbd>↑ ↓</kbd>select</span><span><kbd>ENTER</kbd>choose</span><span><kbd>ESC</kbd>back</span>
+        <span class="fan">GTA 7 is a fan-made game. It isn't affiliated with or endorsed by Rockstar Games. Everything in it is made in code.</span>
+      </div>
     </section>
 
     <section id="invite" class="screen" hidden>
@@ -114,10 +143,10 @@
     <section id="help" class="screen" hidden>
       <h2 class="head">HOW TO PLAY</h2>
       <div class="text">
-        <p>November 1996. <b>Kingsgate Mall</b> is a fenced-off pile of rubble, and the night shift that used to guard it is out of work. The city's still awake, and some of the people who run it have jobs for somebody who doesn't scare easily.</p>
-        <p><b>Take jobs.</b> Walk into the big letter on the radar (and the glowing ring on the street) to start one. Ray Okafor sells used cars; Lena Voss runs the harbour; Dale Mercer, the old night guard, has one last thing for you.</p>
-        <p><b>Steal cars.</b> Walk up to any car and press F, even one with somebody in it. <b>Stars</b> mean the police want you: get out of their sight until they give up, or drive into <b>Spray-N-Go</b>. If they hold on to you, you're busted.</p>
-        <p>Buy guns at <b>Kingsgate Arms</b> on the Strip. Thirteen of Kingsgate Mall's old security tapes are lost round the city. Walk into your place (⌂) to save.</p>
+        <p>November 1996. <b>Kingsgate Mall</b> is a fenced-off pile of rubble, and you used to guard it. Now you're at home in Kingsgate Heights with a car out front, and some of the people who run this city have work for somebody who doesn't scare easily.</p>
+        <p><b>Jobs.</b> The big letters on the radar (O, V, D) are Ray Okafor, Lena Voss and Dale Mercer. Go to their door, walk in, and step into the ring in front of them to start a job.</p>
+        <p><b>Buildings.</b> Walk into a glowing door to go inside: your place (sleep in your bed to save), <b>Kingsgate Arms</b> for guns and armour, <b>Sal's Diner</b> for a meal when you're hurt, and the offices of the people with work.</p>
+        <p><b>Cars.</b> Your own car is parked by your place. Any other car is yours too if you press F next to it. <b>Stars</b> mean the police want you: get out of their sight until they give up, or drive into <b>Spray-N-Go</b>. Days pass, and the street lights come on at night.</p>
         <table>
           <tr><td>WASD</td><td>walk / drive (Shift to sprint)</td></tr>
           <tr><td>Mouse</td><td>look</td></tr>
@@ -125,7 +154,8 @@
           <tr><td>Right mouse</td><td>aim</td></tr>
           <tr><td>Left mouse</td><td>shoot / punch</td></tr>
           <tr><td>Q E, wheel, 1-4</td><td>switch weapons</td></tr>
-          <tr><td>Space</td><td>jump / handbrake / skip</td></tr>
+          <tr><td>E</td><td>buy or eat at a counter</td></tr>
+          <tr><td>Space</td><td>jump / handbrake / skip a cutscene</td></tr>
           <tr><td>H, G, R</td><td>horn, siren (police cars), radio</td></tr>
           <tr><td>M</td><td>map</td></tr>
           <tr><td>Esc</td><td>pause</td></tr>
@@ -169,8 +199,10 @@
       <button data-act="resume">CLICK TO PLAY</button>
     </section>
 
-    <section id="loading" class="screen see-through" hidden>
-      <p class="loading">Turning on the street lights...</p>
+    <section id="loading" class="screen" hidden>
+      <div class="logo"><span class="gta">GTA</span><span class="seven">7</span></div>
+      <p class="loading">LOADING KINGSGATE</p>
+      <p class="tip" id="loadTip"></p>
     </section>
   </div>
   <noscript>This game needs JavaScript.</noscript>

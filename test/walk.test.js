@@ -12,6 +12,8 @@ import { makeCar, stepCar, CAR_TYPES } from '../public/js/shared/car.js';
 import { carVsBox, carVsCar } from '../public/js/shared/collide.js';
 import { MISSIONS, TAPES } from '../public/js/shared/story.js';
 import { PLAYER_R } from '../public/js/shared/config.js';
+import { INTERIORS, INTERIOR, interiorAt, worldSolids, IX } from '../public/js/shared/interiors.js';
+import { FIXTURES } from '../public/js/shared/lights.js';
 
 let failures = 0;
 const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } };
@@ -159,7 +161,46 @@ const reach = new Uint8Array(W * W);
     check(reachable(x, z, 1.0), `the pickup at ${x}, ${z} can be reached`);
   }
   check(reachable(PLACES.hospital.x, PLACES.hospital.z + 1) && reachable(PLACES.police.x, PLACES.police.z + 1), 'you come back somewhere you can walk from');
+  for (const r of INTERIORS) check(reachable(r.door.x, r.door.z, 0.5), `you can walk up to the door of ${r.name}`);
   void n;
+}
+
+// ------------------------------------------------------------ indoors
+{
+  console.log('indoors');
+  const all = worldSolids();
+  check(INTERIORS.length >= 6, `rooms to walk into (${INTERIORS.length})`);
+  for (const r of INTERIORS) {
+    check(r.box.x0 > BOUND + 20, `${r.name} is out of sight of the city`);
+    check(interiorAt(r.entry.x, r.entry.z) === r && !interiorAt(r.door.x, r.door.z), `${r.name}: the door goes from the street to the room`);
+    check(FIXTURES.some((f) => f.room === r.id), `${r.name} has a light`);
+    for (const o of INTERIORS) if (o !== r) check(o.box.x1 < r.box.x0 || o.box.x0 > r.box.x1 || o.box.z1 + 10 < r.box.z0 || o.box.z0 > r.box.z1 + 10, `${r.name} and ${o.name} don't share walls`);
+    // walk from the door: can you get to everything that matters?
+    const G = 0.25, nx = Math.ceil((r.box.x1 - r.box.x0) / G), nz = Math.ceil((r.box.z1 - r.box.z0) / G);
+    const at = (i) => ({ x: r.box.x0 + (i % nx + 0.5) * G, z: r.box.z0 + (Math.floor(i / nx) + 0.5) * G });
+    const ok = (i) => { const p = at(i); return openAt(all, p.x, p.z, PLAYER_R); };
+    const seen = new Uint8Array(nx * nz);
+    const start = Math.floor((r.entry.z - r.box.z0) / G) * nx + Math.floor((r.entry.x - r.box.x0) / G);
+    check(ok(start), `${r.name}: you come in somewhere open`);
+    const q = [start];
+    seen[start] = 1;
+    while (q.length) {
+      const i = q.pop(), ix = i % nx;
+      for (const j of [ix > 0 ? i - 1 : -1, ix < nx - 1 ? i + 1 : -1, i - nx, i + nx]) {
+        if (j < 0 || j >= nx * nz || seen[j] || !ok(j)) continue;
+        seen[j] = 1;
+        q.push(j);
+      }
+    }
+    const near = (x, z, d) => { for (let i = 0; i < seen.length; i++) if (seen[i]) { const p = at(i); if (Math.hypot(p.x - x, p.z - z) < d) return true; } return false; };
+    check(near(r.exit.x, r.exit.z, 0.6), `${r.name}: you can get back out`);
+    for (const [k, sp] of Object.entries(r.spots)) {
+      if (k === 'giver' || k === 'wake') { check(openAt(all, sp.x, sp.z, 0.3), `${r.name}: room to stand at the ${k} spot`); continue; }
+      check(near(sp.x, sp.z, k === 'save' ? 0.9 : 1.2), `${r.name}: you can walk to the ${k} spot`);
+    }
+  }
+  check(!!INTERIOR.home.spots.save && !!INTERIOR.guns.spots.shop && !!INTERIOR.diner.spots.eat, 'a bed, a gun counter and a diner counter');
+  void IX;
 }
 
 // ------------------------------------------------------------ the jobs
