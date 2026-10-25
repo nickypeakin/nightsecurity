@@ -1,4 +1,4 @@
-// Cars: the models on Kingsgate's streets and how they drive. The physics
+// Cars: the models on San Cielo's streets and how they drive. The physics
 // is arcade and two-dimensional, the car keeping to the ground (hills slow
 // you going up and speed you coming down, and the sea's edge stops you like
 // a wall): a bicycle model for steering, a

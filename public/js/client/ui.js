@@ -135,7 +135,7 @@ export class Hud {
       const price = owned ? W.ammoPrice : W.price;
       return `<button data-buy="${s.key}" ${money < price ? 'disabled' : ''}><span>${i + 1}. ${esc(owned ? `${s.label} ammo` : s.label)}</span><span>$${price}</span></button>`;
     }).join('');
-    el.innerHTML = `<h2>KINGSGATE ARMS</h2><p class="sub">Cash: $${money}</p>${rows}<p class="msg">${esc(msg)}</p><p class="small">Click or press 1-4 to buy · E or Esc to leave</p>`;
+    el.innerHTML = `<h2>FREEDOM ARMS</h2><p class="sub">Cash: $${money}</p>${rows}<p class="msg">${esc(msg)}</p><p class="small">Click or press 1-4 to buy · E or Esc to leave</p>`;
   }
 
   reset() {

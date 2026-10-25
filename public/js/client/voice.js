@@ -1,5 +1,6 @@
 // Spoken lines, using the voices built into the browser (speechSynthesis):
-// Okafor, Voss and Dale giving you jobs, the police dispatcher, people in
+// Dre, Okafor, Voss and Vince giving you jobs, you answering back, the
+// police dispatcher, people in
 // the street. Subtitles always show, so a browser without voices loses
 // nothing but the sound. Can be switched off in Settings. (From Cinder
 // Peak.)
@@ -7,7 +8,9 @@
 const STYLE = {
   okafor: { pitch: 0.85, rate: 0.98, sex: 'm' },
   voss: { pitch: 0.92, rate: 0.96, sex: 'f' },
-  dale: { pitch: 0.7, rate: 0.86, sex: 'm', volume: 0.85 },
+  dre: { pitch: 1.08, rate: 1.14, sex: 'm' },
+  vince: { pitch: 0.72, rate: 0.9, sex: 'm', volume: 0.9 },
+  you: { pitch: 0.95, rate: 1.02, sex: 'm' },
   brill: { pitch: 0.6, rate: 1.05, sex: 'm' },
   radio: { pitch: 1.1, rate: 1.1, sex: 'f', volume: 0.75 },
   ped: { pitch: 1.05, rate: 1.15, sex: null, volume: 0.6 },

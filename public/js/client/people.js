@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makePerson, LOOKS, Rig } from './humans.js';
 import { makeRng } from '../shared/rng.js';
-import { LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_MQ, LOOK_BOSS, LOOK_MQ2, PED_LOOKS } from '../host/peds.js';
+import { LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_DRE, LOOK_BOSS, LOOK_VOSS, PED_LOOKS } from '../host/peds.js';
 
 // ------------------------------------------------------------------ looks
 const SKIN = [0xf0c8a6, 0xdcae8a, 0xb77a52, 0x8a5638, 0x5a3a28, 0xe8b894, 0xc89070, 0x6a4430];
@@ -35,15 +35,17 @@ const SPECIAL = {
   [LOOK_GANG]: { sex: 'm', skin: 0xb77a52, hair: 'buzz', hairColor: 0x120c09, hat: 'cap', hatColor: 0x8a1010, top: 'hoodie', topColor: 0x6a1010, bottom: 'jeans', bottomColor: 0x5a7fa8, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.8 },
   [LOOK_CREW]: { sex: 'm', skin: 0xdcae8a, hair: 'slick', hairColor: 0x1a1a1a, glasses: true, top: 'suit', topColor: 0x141416, inner: 0x141416, tie: 0x141416, bottom: 'trousers', bottomColor: 0x141416, shoes: 'dress', shoeColor: 0x0a0a0a, height: 1.84 },
   [LOOK_BOSS]: { sex: 'm', skin: 0xe0b898, hair: 'balding', hairColor: 0x5a3a20, mustache: true, top: 'coat', topColor: 0x3a2a1a, bottom: 'trousers', bottomColor: 0x2a2420, shoes: 'dress', shoeColor: 0x1a0e08, height: 1.78, heavy: 1.12 },
-  [LOOK_MQ]: 'mq1',
-  [LOOK_MQ2]: 'mq0',
+  [LOOK_DRE]: 'dre',
+  [LOOK_VOSS]: null,
 };
 export const PLAYER_LOOKS = ['friend0', 'friend1', 'friend2', 'friend3'];
 export const GIVER_LOOKS = {
+  dre: 'dre',
   okafor: 'manager',
-  dale: { ...LOOKS.dale, top: 'jacket', topColor: 0x4a3a2a },
+  vince: 'vince',
   voss: { sex: 'f', skin: 0xe8c8b0, iris: 0x4a6a8a, hair: 'slick', hairColor: 0xc8c0b0, top: 'coat', topColor: 0x1a1a1e, bottom: 'trousers', bottomColor: 0x141416, shoes: 'dress', shoeColor: 0x0a0a0a, height: 1.76 },
 };
+SPECIAL[LOOK_VOSS] = GIVER_LOOKS.voss;
 
 export function lookFor(id) {
   if (typeof id === 'string' || typeof id === 'object') return id;

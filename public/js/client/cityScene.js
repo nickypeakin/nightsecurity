@@ -1,7 +1,7 @@
-// Kingsgate in 3D: built once at start-up from the plan in shared/city.js,
+// San Cielo in 3D: built once at start-up from the plan in shared/city.js,
 // and shared by the title screen and every game. Streets, sidewalks and
 // buildings become a few big meshes per material per block of the city;
-// lamp posts, trees, bins and the rest are instanced (one draw for all of a
+// lamp posts, palms, bins and the rest are instanced (one draw for all of a
 // kind); building fronts glow where somebody's left a light on.
 
 import * as THREE from 'three';
@@ -13,10 +13,11 @@ import { Interiors } from './interiorScene.js';
 import { Country } from './countryScene.js';
 import { START_HOUR, sunAt } from '../shared/config.js';
 import {
-  LINES, ROAD, CURB, STOP, NODES, EDGES, BLOCKS, BUILDINGS, PROPS, GROUNDS, SOLID_EXTRA, HARBOR, SIDEWALK_Y, light, hasLights, PLACES, EXITS,
+  ROAD, CURB, STOP, NODES, EDGES, BLOCKS, BUILDINGS, PROPS, GROUNDS, SOLID_EXTRA, HARBOR, SIDEWALK_Y, light, hasLights, PLACES, sides, inTown, blockAt,
 } from '../shared/city.js';
+import { GROUND as TOWN_GROUND, TOWN, cellBlock } from '../shared/plan.js';
 
-const CH = 80;
+const CH = 120;
 const chunkOf = (x, z) => `${Math.floor((x + 240) / CH)}:${Math.floor((z + 240) / CH)}`;
 
 // ------------------------------------------------------------- geometry --
@@ -121,6 +122,10 @@ function mats() {
   M.bark = mat(0x3a2a1c, { rough: 0.95 });
   M.leaves = mat(0x1e3418, { rough: 0.95 });
   M.leaves2 = mat(0x26401c, { rough: 0.95 });
+  M.palmBark = mat(0x76644a, { rough: 0.95 });
+  M.frond = new THREE.MeshStandardMaterial({ color: 0x3a6a24, roughness: 0.9, side: THREE.DoubleSide });
+  M.pool = std({ color: 0x2a9ac8, roughness: 0.1, metalness: 0.1, emissive: 0x0a3a50, emissiveIntensity: 0.4 });
+  M.poolEdge = mat(0xe8e4d8, { rough: 0.8 });
   M.wood = mat(0x5a4030, { rough: 0.85 });
   M.green = mat(0x1e4a2a, { rough: 0.6 });
   M.blue = mat(0x1a3a7a, { rough: 0.5, metal: 0.2 });
@@ -275,7 +280,6 @@ export class City {
   buildGround() {
     const F = new Faces();
     const Y = SIDEWALK_Y;
-    const E = 200 + CURB;
     // roads: the stretches between junctions, and the junctions (the
     // highways out of town are countryScene's)
     for (const e of EDGES) {
@@ -302,33 +306,44 @@ export class City {
       const k = g.kind === 'asphalt' ? 'asphalt' : g.kind;
       F.floor(k, g.x0, g.x1, g.z0, g.z1, g.kind === 'path' ? Y + 0.008 : Y + 0.004);
     }
-    // the sidewalks round the outside of the ring road, with gaps where the
-    // highways leave town
-    const o = 200 + ROAD;
-    const gaps = (along, side) => EXITS.filter((x) => (side === 'n' ? x.dz < 0 : side === 's' ? x.dz > 0 : side === 'w' ? x.dx < 0 : x.dx > 0))
-      .map((x) => (along === 'x' ? NODES[x.node].x : NODES[x.node].z));
-    const strip = (side, a0, a1, b0, b1) => {
-      // a0..a1 along the side, b0..b1 across it; cut round each gap
-      const along = side === 'n' || side === 's' ? 'x' : 'z';
-      let a = a0;
-      for (const g of [...gaps(along, side), Infinity].sort((p, q) => p - q)) {
-        const end = Math.min(a1, g - ROAD);
-        if (end > a) along === 'x' ? F.floor('sidewalk', a, end, b0, b1, Y) : F.floor('sidewalk', b0, b1, a, end, Y);
-        a = Math.max(a, g + ROAD);
+    // the sidewalks along the outside of the streets round the edge of town
+    // (each stretch, and round each junction where nothing else is)
+    const W = CURB - ROAD;
+    for (const e of EDGES) {
+      if (e.hw) continue;
+      const A = NODES[e.a], B = NODES[e.b];
+      const [s0, s1] = sides(e);
+      if (e.axis === 'x') {
+        const x0 = A.x + ROAD, x1 = B.x - ROAD;
+        if (s0 < 0) { F.floor('sidewalk', x0, x1, A.z - CURB, A.z - ROAD, Y); F.wall('curb', x0, A.z - ROAD, x1, A.z - ROAD, 0, Y); }
+        if (s1 < 0) { F.floor('sidewalk', x0, x1, A.z + ROAD, A.z + CURB, Y); F.wall('curb', x1, A.z + ROAD, x0, A.z + ROAD, 0, Y); }
+      } else {
+        const z0 = A.z + ROAD, z1 = B.z - ROAD;
+        if (s0 < 0) { F.floor('sidewalk', A.x - CURB, A.x - ROAD, z0, z1, Y); F.wall('curb', A.x - ROAD, z1, A.x - ROAD, z0, 0, Y); }
+        if (s1 < 0) { F.floor('sidewalk', A.x + ROAD, A.x + CURB, z0, z1, Y); F.wall('curb', A.x + ROAD, z0, A.x + ROAD, z1, 0, Y); }
       }
-    };
-    const kerb = (side, ax, az, bx, bz) => {
-      const along = az === bz ? 'x' : 'z';
-      const lo = along === 'x' ? Math.min(ax, bx) : Math.min(az, bz), hi = along === 'x' ? Math.max(ax, bx) : Math.max(az, bz);
-      const dir = along === 'x' ? Math.sign(bx - ax) : Math.sign(bz - az);
-      let segs = [], a = lo;
-      for (const g of [...gaps(along, side), Infinity].sort((p, q) => p - q)) { const end = Math.min(hi, g - ROAD); if (end > a) segs.push([a, end]); a = Math.max(a, g + ROAD); }
-      if (dir < 0) segs = segs.map(([p, q]) => [q, p]).reverse();
-      for (const [p, q] of segs) along === 'x' ? F.wall('curb', p, az, q, bz, 0, Y) : F.wall('curb', ax, p, bx, q, 0, Y);
-    };
-    strip('n', -E, E, -E, -o); strip('w', -o, o, -E, -o); strip('e', -o, o, o, E);
-    F.floor('sidewalk', -E, E, o, HARBOR.z0, Y);
-    kerb('n', -o, -o, o, -o); kerb('e', o, -o, o, o); F.wall('curb', o, o, -o, o, 0, Y); kerb('w', -o, o, -o, -o);
+    }
+    for (const n of NODES) {
+      if (!n.city) continue;
+      // which ways a road (or a highway) leaves this junction
+      const out = { n: false, s: false, e: false, w: false };
+      for (const eid of n.edges) {
+        const e = EDGES[eid], o = NODES[e.a === n.id ? e.b : e.a];
+        const dx = o.x - n.x, dz = o.z - n.z;
+        if (Math.abs(dx) > Math.abs(dz)) out[dx > 0 ? 'e' : 'w'] = true; else out[dz > 0 ? 's' : 'n'] = true;
+      }
+      const { x, z } = n;
+      if (!out.n) { F.floor('sidewalk', x - ROAD, x + ROAD, z - CURB, z - ROAD, Y); F.wall('curb', x - ROAD, z - ROAD, x + ROAD, z - ROAD, 0, Y); }
+      if (!out.s) { F.floor('sidewalk', x - ROAD, x + ROAD, z + ROAD, z + CURB, Y); F.wall('curb', x + ROAD, z + ROAD, x - ROAD, z + ROAD, 0, Y); }
+      if (!out.w) { F.floor('sidewalk', x - CURB, x - ROAD, z - ROAD, z + ROAD, Y); F.wall('curb', x - ROAD, z + ROAD, x - ROAD, z - ROAD, 0, Y); }
+      if (!out.e) { F.floor('sidewalk', x + ROAD, x + CURB, z - ROAD, z + ROAD, Y); F.wall('curb', x + ROAD, z - ROAD, x + ROAD, z + ROAD, 0, Y); }
+      for (const [qi, qj, sx, sz] of [[n.i - 1, n.j - 1, -1, -1], [n.i, n.j - 1, 1, -1], [n.i - 1, n.j, -1, 1], [n.i, n.j, 1, 1]]) {
+        if (cellBlock(qi, qj) >= 0) continue;
+        const ax = x + sx * ROAD, bx = x + sx * CURB, az = z + sz * ROAD, bz = z + sz * CURB;
+        F.floor('sidewalk', Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz), Y);
+      }
+    }
+    void W;
     // the quay's edge, down to the water
     F.wall('quay', HARBOR.x0, HARBOR.z1, HARBOR.x1, HARBOR.z1, -1.2, Y);
     for (const m of F.meshes((k) => M[k] || M.concrete)) { m.receiveShadow = true; this.scene.add(m); }
@@ -377,6 +392,7 @@ export class City {
     const keyMats = new Map();
     const reg = (key, m) => { keyMats.set(key, m); return key; };
     let shopSeed = 0;
+    const shops = [];
     this.signs = new THREE.Group();
     this.scene.add(this.signs);
     for (const b of BUILDINGS) {
@@ -398,7 +414,7 @@ export class City {
           if (bottom < y0) F.wall(fk, ax, az, bx, bz, bottom, y0, u0, -y0);
           F.wall(sk, ax, az, bx, bz, y0, y0 + 3.6, u0, -y0);
           F.wall(fk, ax, az, bx, bz, y0 + 3.6, top, u0, -y0);
-          this.shopSign(b, side, shopSeed++);
+          shops.push({ b, side, seed: shopSeed++ });
         } else F.wall(fk, ax, az, bx, bz, bottom, top, u0, -y0);
       }
       if (pitched) this.pitched(F, b, top);
@@ -411,6 +427,7 @@ export class City {
       }
       if (b.name && kind !== 'shop') this.nameSign(b);
     }
+    this.shopSigns(shops);
     keyMats.set('roof', M.roof);
     keyMats.set('shingles', M.shingles);
     keyMats.set('parapet', new THREE.MeshStandardMaterial({ color: 0x4a4844, roughness: 0.9 }));
@@ -438,27 +455,72 @@ export class City {
     }
   }
 
-  shopSign(b, side, seed) {
-    const st = SIGN_STYLE[seed % SIGN_STYLE.length];
-    const name = (b.name || SHOP_NAMES[seed % SHOP_NAMES.length]).toUpperCase();
-    const tex = TX.sign(name, { w: 768, h: 128, bg: st[0], fg: st[1], font: st[2], glow: st[3] });
-    const w = (side === 'n' || side === 's' ? b.x1 - b.x0 : b.z1 - b.z0) - 1.2;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.9), new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color().setScalar(st[3] ? 1.6 : 1.0) }));
-    m.userData.glow = st[3] ? 1.6 : 1.0;
-    const out = 0.12;
-    const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2, sy = (b.y || 0) + 4.2;
-    if (side === 'n') m.position.set(cx, sy, b.z0 - out), m.rotation.y = Math.PI;
-    if (side === 's') m.position.set(cx, sy, b.z1 + out);
-    if (side === 'e') m.position.set(b.x1 + out, sy, cz), m.rotation.y = Math.PI / 2;
-    if (side === 'w') m.position.set(b.x0 - out, sy, cz), m.rotation.y = -Math.PI / 2;
-    this.signs.add(m);
-    if (b.awning) {
-      const a = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 1.4), mat(st[3] ? 0x6a1a2a : 0x1a3a2a, { rough: 0.8 }));
-      a.position.copy(m.position).y = (b.y || 0) + 3.55;
-      a.rotation.y = m.rotation.y;
-      a.translateZ(0.7);
-      a.rotation.x = 0.0;
-      this.signs.add(a);
+  // every shop's sign over its door, and the awnings: the names drawn on a
+  // few shared pictures, the boards merged a block of town at a time
+  shopSigns(list) {
+    const items = list.map(({ b, side, seed }) => {
+      const si = seed % SIGN_STYLE.length, st = SIGN_STYLE[si];
+      const text = (b.name || SHOP_NAMES[seed % SHOP_NAMES.length]).toUpperCase();
+      return { b, side, st, text, key: `${text}|${si}`, chunk: chunkOf((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2) };
+    });
+    // (a block's signs together, so they tend to share a page)
+    items.sort((a, b) => (a.chunk < b.chunk ? -1 : a.chunk > b.chunk ? 1 : 0));
+    const slots = new Map();
+    for (const it of items) if (!slots.has(it.key)) slots.set(it.key, slots.size);
+    const entries = [...slots.keys()].map((k) => { const it = items.find((q) => q.key === k); return { text: it.text, bg: it.st[0], fg: it.st[1], font: it.st[2], glow: it.st[3] }; });
+    const L = { sw: 384, sh: 64, cols: 5, rows: 32 };
+    const pages = TX.signAtlas(entries, L);
+    const per = L.cols * L.rows;
+    // two materials a page: plain, and lit (brighter at night)
+    this.litSigns = [];
+    const mats = pages.map((map) => {
+      const lit = new THREE.MeshBasicMaterial({ map });
+      this.litSigns.push(lit);
+      return [new THREE.MeshBasicMaterial({ map }), lit];
+    });
+    const groups = new Map();
+    const awnings = new Map();
+    for (const it of items) {
+      const { b, side } = it;
+      const slot = slots.get(it.key), page = Math.floor(slot / per), k = slot % per;
+      const u0 = ((k % L.cols) + 0.01) / L.cols, u1 = ((k % L.cols) + 0.99) / L.cols;
+      const v1 = 1 - (Math.floor(k / L.cols) + 0.04) / L.rows, v0 = 1 - (Math.floor(k / L.cols) + 0.96) / L.rows;
+      const w = (side === 'n' || side === 's' ? b.x1 - b.x0 : b.z1 - b.z0) - 1.2;
+      const out = 0.12, y = (b.y || 0) + 4.2, cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+      // the board's middle, and which way along it is "right" seen from the street
+      const [mx, mz, rx, rz, nx, nz] = { s: [cx, b.z1 + out, 1, 0, 0, 1], n: [cx, b.z0 - out, -1, 0, 0, -1], e: [b.x1 + out, cz, 0, -1, 1, 0], w: [b.x0 - out, cz, 0, 1, -1, 0] }[side];
+      const gk = `${it.chunk}|${page}|${it.st[3] ? 1 : 0}`;
+      if (!groups.has(gk)) groups.set(gk, { chunk: it.chunk, mat: mats[page][it.st[3] ? 1 : 0], pos: [], nor: [], uv: [] });
+      const G = groups.get(gk);
+      const P = [[mx - rx * w / 2, y - 0.45, mz - rz * w / 2], [mx + rx * w / 2, y - 0.45, mz + rz * w / 2], [mx + rx * w / 2, y + 0.45, mz + rz * w / 2], [mx - rx * w / 2, y + 0.45, mz - rz * w / 2]];
+      const U = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+      for (const q of [0, 1, 2, 0, 2, 3]) { G.pos.push(...P[q]); G.nor.push(nx, 0, nz); G.uv.push(...U[q]); }
+      if (b.awning) {
+        const ak = `${it.chunk}|${it.st[3] ? 1 : 0}`;
+        if (!awnings.has(ak)) awnings.set(ak, { chunk: it.chunk, lit: it.st[3], parts: [] });
+        awnings.get(ak).parts.push(box(null, mx + nx * 0.7, (b.y || 0) + 3.55, mz + nz * 0.7, w, 0.12, 1.4, { ry: Math.atan2(nx, nz) }));
+      }
+    }
+    for (const G of groups.values()) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(G.pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(G.nor, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(G.uv, 2));
+      g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, G.mat);
+      m.matrixAutoUpdate = false;
+      m.userData.chunk = G.chunk;
+      this.scene.add(m);
+    }
+    const awningMat = [mat(0x1a3a2a, { rough: 0.8 }), mat(0x6a1a2a, { rough: 0.8 })];
+    for (const A of awnings.values()) {
+      const m = A.lit ? awningMat[1] : awningMat[0];
+      for (const { geo } of parts(A.parts.map((p) => ({ ...p, mat: m })))) {
+        const mesh = new THREE.Mesh(geo, m);
+        mesh.matrixAutoUpdate = false;
+        mesh.userData.chunk = A.chunk;
+        this.scene.add(mesh);
+      }
     }
   }
 
@@ -468,13 +530,22 @@ export class City {
       'City Hall': ['#c8bea8', '#2a2418', 'bold 70px Georgia, serif', false, 2.0],
       'Mercy General': ['#e8e8e8', '#c01818', 'bold 80px Arial, sans-serif', true, 2.0],
       EMERGENCY: ['#c01818', '#ffffff', 'bold 90px Arial Black, sans-serif', true, 1.0],
-      'Kingsgate Police': ['#1a2a5a', '#ffffff', 'bold 70px Arial, sans-serif', true, 1.6],
+      'San Cielo Police': ['#1a2a5a', '#ffffff', 'bold 70px Arial, sans-serif', true, 1.6],
       "Okafor's Motors": ['#101010', '#ffd04a', 'bold 80px Arial Black, Impact, sans-serif', true, 1.4],
       'VOSS FREIGHT': ['#2a2a2e', '#d8d8d8', 'bold 80px Arial, sans-serif', false, 2.0],
       'Gas-N-Go': ['#c01818', '#ffffff', 'bold 90px Arial Black, sans-serif', true, 1.4],
       'Tire World': ['#101010', '#7ac8ff', 'bold 80px Arial, sans-serif', true, 1.2],
       'Your Place': null,
-      'Kingsgate International': ['#e8eef4', '#1a3a7a', 'bold 72px Arial, sans-serif', false, 2.0],
+      'San Cielo International': ['#e8eef4', '#1a3a7a', 'bold 72px Arial, sans-serif', false, 2.0],
+      'Moreno Estate': ['#f0ead8', '#6a4a1a', 'bold 72px Georgia, serif', false, 1.6],
+      'Starlight Theatre': ['#2a0a1a', '#ffd84a', 'bold 80px Georgia, serif', true, 1.6],
+      'Grand Hotel': ['#1a1a1a', '#e8c878', 'bold 80px Georgia, serif', true, 2.0],
+      'Night Club': ['#100818', '#ff4ad8', 'bold 90px Arial Black, sans-serif', true, 1.2],
+      'Diamond Exchange': ['#0a1a2a', '#bfe8ff', 'bold 72px Georgia, serif', true, 1.6],
+      Bank: ['#e8e4d8', '#1a3a2a', 'bold 90px Georgia, serif', false, 1.4],
+      "Sal's Diner": ['#c8e8e8', '#c01818', 'bold 90px Arial Black, sans-serif', true, 1.2],
+      'Freedom Arms': ['#1a1a1a', '#ff3a2a', 'bold 80px Impact, Arial Black, sans-serif', true, 1.2],
+      'Pier Café': ['#f4ecd8', '#1a5a7a', 'bold 80px Georgia, serif', false, 1.2],
       'KERRY SAWMILL': ['#3a2a1a', '#e8d8b8', 'bold 80px Georgia, serif', false, 1.5],
       Hangar: ['#2a2a2e', '#e8e8e8', 'bold 90px Arial, sans-serif', false, 1.5],
     };
@@ -494,7 +565,7 @@ export class City {
     this.signs.add(m);
   }
 
-  // walls and fences (from SOLID_EXTRA), the spray shop, the mall sign
+  // walls and fences (from SOLID_EXTRA), the spray shop
   buildExtras() {
     const F = new Faces();
     for (const w of SOLID_EXTRA) {
@@ -525,15 +596,18 @@ export class City {
     const chunk = (key) => {
       if (!this.chunks.has(key)) {
         const [i, j] = key.split(':').map(Number);
-        this.chunks.set(key, { cx: -240 + (i + 0.5) * CH, cz: -240 + (j + 0.5) * CH, near: [], far: null, city: Math.abs(-240 + (i + 0.5) * CH) < 240 && Math.abs(-240 + (j + 0.5) * CH) < 260, shown: null });
+        const x0 = -240 + i * CH, z0 = -240 + j * CH;
+        const city = TOWN_GROUND.some((r) => r.x0 < x0 + CH && r.x1 > x0 && r.z0 < z0 + CH && r.z1 > z0);
+        this.chunks.set(key, { cx: x0 + CH / 2, cz: z0 + CH / 2, near: [], far: null, city, shown: null });
       }
       return this.chunks.get(key);
     };
     for (const o of this.scene.children) if (o.isMesh && o.userData.chunk) chunk(o.userData.chunk).near.push(o);
     const glow = TX.facade('office', 0);
     const [fw, fh] = glow.size;
-    this.farMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, emissiveMap: TX.meters(glow.glow, fw, fh), emissive: 0xffffff, emissiveIntensity: 0 });
-    const tone = { glass: [0.25, 0.33, 0.4], office: [0.5, 0.48, 0.44], stone: [0.62, 0.58, 0.52], brick: [0.42, 0.26, 0.2], shop: [0.48, 0.38, 0.3], warehouse: [0.38, 0.4, 0.4], house: [0.66, 0.62, 0.55], hospital: [0.8, 0.8, 0.78], station: [0.38, 0.32, 0.26], civic: [0.74, 0.7, 0.62] };
+    this.farMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, map: TX.meters(glow.map, fw, fh), emissiveMap: TX.meters(glow.glow, fw, fh), emissive: 0xffffff, emissiveIntensity: 0 });
+    // (tints over the office facade, roughly each kind's own colour)
+    const tone = { glass: [0.5, 0.66, 0.8], office: [1, 0.96, 0.9], stone: [1.2, 1.12, 1], brick: [0.9, 0.55, 0.42], shop: [1, 0.8, 0.62], warehouse: [0.75, 0.78, 0.78], house: [1.3, 1.22, 1.08], hospital: [1.5, 1.5, 1.46], station: [0.8, 0.66, 0.54], civic: [1.4, 1.32, 1.18] };
     const by = new Map();
     const put = (key) => { if (!by.has(key)) by.set(key, { pos: [], nor: [], col: [], uv: [] }); return by.get(key); };
     const lin = (c) => { const k = new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace); return [k.r, k.g, k.b]; };
@@ -547,14 +621,16 @@ export class City {
         const len = Math.hypot(bx - ax, bz - az), nx = -(bz - az) / len, nz = (bx - ax) / len;
         quad(B, [[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], [nx, 0, nz], c, [[0, y0], [len, y0], [len, y1], [0, y1]]);
       }
-      quad(B, [[b.x0, y1, b.z1], [b.x1, y1, b.z1], [b.x1, y1, b.z0], [b.x0, y1, b.z0]], [0, 1, 0], roof, [[0, 0], [0, 0], [0, 0], [0, 0]]);
+      quad(B, [[b.x0, y1, b.z1], [b.x1, y1, b.z1], [b.x1, y1, b.z0], [b.x0, y1, b.z0]], [0, 1, 0], roof, [[0.1, 0.1], [0.1, 0.1], [0.1, 0.1], [0.1, 0.1]]);
     }
     // the ground of each square of town, one shade
     for (const [key, C] of this.chunks) {
       if (!C.city) continue;
-      const x0 = Math.max(-209, C.cx - CH / 2), x1 = Math.min(209, C.cx + CH / 2), z0 = Math.max(-209, C.cz - CH / 2), z1 = Math.min(236, C.cz + CH / 2);
-      if (x1 <= x0 || z1 <= z0) continue;
-      quad(put(key), [[x0, 0.05, z1], [x1, 0.05, z1], [x1, 0.05, z0], [x0, 0.05, z0]], [0, 1, 0], lin([0.24, 0.25, 0.25]), [[0, 0], [0, 0], [0, 0], [0, 0]]);
+      for (const r of TOWN_GROUND) {
+        const x0 = Math.max(r.x0, C.cx - CH / 2), x1 = Math.min(r.x1, C.cx + CH / 2), z0 = Math.max(r.z0, C.cz - CH / 2), z1 = Math.min(r.z1, C.cz + CH / 2);
+        if (x1 <= x0 || z1 <= z0) continue;
+        quad(put(key), [[x0, 0.05, z1], [x1, 0.05, z1], [x1, 0.05, z0], [x0, 0.05, z0]], [0, 1, 0], lin([0.42, 0.44, 0.44]), [[0.1, 0.1], [0.1, 0.1], [0.1, 0.1], [0.1, 0.1]]);
+      }
     }
     for (const [key, B] of by) {
       const g = new THREE.BufferGeometry();
@@ -580,11 +656,11 @@ export class City {
   // near squares in full, far ones plain (or not at all, out of town)
   lod(cam) {
     const x = cam.position.x, z = cam.position.z, high = Math.max(0, cam.position.y - 40);
-    const whole = Math.hypot(x, z) > 900;
+    const whole = Math.hypot(x - (TOWN.x0 + TOWN.x1) / 2, z - (TOWN.z0 + TOWN.z1) / 2) > 1000;
     if (whole !== this.wasWhole) { this.wasWhole = whole; this.farTown.visible = whole; for (const C of this.chunks.values()) C.shown = null; }
     for (const C of this.chunks.values()) {
       const d = Math.hypot(C.cx - x, C.cz - z) + high * 0.5;
-      const near = d < (C.city ? 470 : 900);
+      const near = d < (C.city ? 400 : 900);
       if (near === C.shown) continue;
       C.shown = near;
       for (const m of C.near) m.visible = near;
@@ -628,7 +704,7 @@ export class City {
       box(M.darkMetal, 0, 7.05, 1.45, 0.34, 0.12, 0.7), box(white ? M.lampWhite : M.lampHead, 0, 6.97, 1.45, 0.26, 0.04, 0.55),
     ];
     const lamps = P.lamp || [];
-    const downtown = (p) => Math.abs(p.x) < 90 && Math.abs(p.z) < 90;
+    const downtown = (p) => ['down', 'plaza', 'starlight'].includes(BLOCKS[blockAt(p.x, p.z)]?.kind);
     inst(lamps.filter((p) => !downtown(p)), lamp(false));
     inst(lamps.filter(downtown), lamp(true));
     inst(P.parkLamp, [cyl(M.black, 0, 2, 0, 0.07, 4), ball(M.globe, 0, 4.25, 0, 0.26)]);
@@ -636,6 +712,10 @@ export class City {
     // trees: a trunk and a few blobs of leaves
     const tree = [cyl(M.bark, 0, 1.6, 0, 0.16, 3.2), ball(M.leaves, 0, 3.8, 0, 1.9, 1.6, 1.9, { ico: true }), ball(M.leaves2, 0.7, 4.6, 0.3, 1.3, 1.1, 1.3, { ico: true }), ball(M.leaves, -0.6, 4.4, -0.5, 1.2, 1.0, 1.2, { ico: true })];
     inst(P.tree, tree, { scale: (p) => (p.big ? 1.4 : 0.9 + ((p.x * 7.3 + p.z) % 1 + 1) % 1 * 0.3) });
+    // palms: a tall leaning trunk and a crown of drooping fronds
+    const palm = [cyl(M.palmBark, 0.25, 3.9, 0, 0.17, 7.8, { rz: -0.06 }), ball(M.palmBark, 0.5, 7.8, 0, 0.4, 0.35, 0.4, { ico: true }),
+      ...[0, 1, 2, 3, 4, 5, 6].map((k) => { const a = k * 0.9; return box(M.frond, 0.5 + Math.cos(a) * 1.5, 7.45, Math.sin(a) * 1.5, 3.4, 0.05, 0.85, { ry: -a, rz: -0.42 }); })];
+    inst(P.palm, palm, { scale: (p) => 0.85 + ((p.x * 3.1 + p.z * 1.7) % 1 + 1) % 1 * 0.35 });
     inst(P.bench, [box(M.wood, 0, 0.45, 0, 1.8, 0.06, 0.45), box(M.wood, 0, 0.75, -0.2, 1.8, 0.4, 0.05), box(M.black, -0.8, 0.22, 0, 0.06, 0.44, 0.4), box(M.black, 0.8, 0.22, 0, 0.06, 0.44, 0.4)]);
     inst(P.bin, [cyl(M.green, 0, 0.5, 0, 0.28, 1.0), cyl(M.black, 0, 1.02, 0, 0.3, 0.06)]);
     inst(P.hydrant, [cyl(M.red, 0, 0.35, 0, 0.13, 0.7), ball(M.red, 0, 0.72, 0, 0.13), cyl(M.red, 0, 0.45, 0, 0.06, 0.4, { rz: Math.PI / 2 })]);
@@ -670,9 +750,12 @@ export class City {
       flags.push(box(M.black, 0, 4.6, 0, p.w, 0.03, 0.03));
       this.single(p, flags);
     }
-    for (const p of P.mallSign || []) {
-      const face = new THREE.MeshStandardMaterial({ map: TX.sign('KINGSGATE\nMALL', { w: 512, h: 512, bg: '#1a120c', fg: '#c8903a', font: 'bold 120px Georgia, serif', glow: true }), emissive: 0xffffff, emissiveMap: TX.sign('KINGSGATE\nMALL', { w: 512, h: 512, bg: '#000000', fg: '#6a4818', font: 'bold 120px Georgia, serif', glow: true }), roughness: 0.6 });
-      this.single(p, [box(M.darkMetal, 0, 3, 0, 0.5, 6, 0.5), box(face, 0, 7, 0, 3.6, 3.6, 0.4)]);
+    // pools behind the big houses
+    const pools = new Map();
+    for (const p of P.pool || []) { const k = chunkOf(p.x, p.z); if (!pools.has(k)) pools.set(k, []); pools.get(k).push(p); }
+    for (const list of pools.values()) {
+      const o = list[0];
+      this.single(o, list.flatMap((p) => [box(M.poolEdge, p.x - o.x, 0.06, p.z - o.z, p.w + 1.4, 0.12, p.d + 1.4), box(M.pool, p.x - o.x, 0.1, p.z - o.z, p.w, 0.06, p.d)]));
     }
     // traffic lights: a pole at each corner, a head facing the traffic it
     // runs, three lamps a head (lit by update())
@@ -773,6 +856,7 @@ export class City {
       const g = m.userData.glow;
       if (g && m.material.color) m.material.color.setScalar(1 + (g - 1) * night);
     }
+    for (const m of this.litSigns || []) m.color.setScalar(1 + 0.6 * night);
   }
 
   // keep the sky round the camera; clouds drift; far squares of the

@@ -1,7 +1,7 @@
 // Tuning numbers shared by the host simulation and every client.
 
 export const MAX_PLAYERS = 4;
-export const PEER_PREFIX = 'gsgs-kingsgate-city-';
+export const PEER_PREFIX = 'gsgs-gta7-san-cielo-';
 // bump whenever host and guest messages change: mismatched copies refuse to mix
 export const PROTOCOL = 4;
 

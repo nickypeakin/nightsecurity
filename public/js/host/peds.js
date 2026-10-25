@@ -1,8 +1,8 @@
 // People on foot, run by the host: pedestrians walking the sidewalks (they
 // wait for the lights to cross, run from gunfire, get knocked flying by
 // cars and drop their cash), police officers (chase, arrest, shoot),
-// gang members (shoot), a getaway crew, and, for one job, the mannequins
-// from Halvorsen's, who only move while nobody is looking at them.
+// gang members (shoot), and your friends on a job (a getaway crew, Dre),
+// who go where they're told and get in where they're told.
 
 import { WALK_NODES, light, nodeAt, groundY } from '../shared/city.js';
 import { circleVsCar } from '../shared/collide.js';
@@ -11,7 +11,7 @@ import { BARKS } from '../shared/story.js';
 
 // pedestrian looks: the client has a body for each (0..PED_LOOKS-1)
 export const PED_LOOKS = 14;
-export const LOOK_COP = 100, LOOK_GANG = 101, LOOK_CREW = 102, LOOK_MQ = 103, LOOK_BOSS = 104, LOOK_MQ2 = 105;
+export const LOOK_COP = 100, LOOK_GANG = 101, LOOK_CREW = 102, LOOK_DRE = 103, LOOK_BOSS = 104, LOOK_VOSS = 105;
 
 // anim codes the client understands
 export const A = { idle: 0, walk: 1, run: 2, aim: 3, down: 4, dead: 5, hands: 6, punch: 7, still: 8, cower: 9 };
@@ -238,34 +238,6 @@ export class Crowd {
     }
   }
 
-  // ------------------------------------------------------------- mannequins
-  // They only move while no player can see them: not in anyone's view (the
-  // way their camera faces), or too far away in the dark. They're quick.
-  stepMannequin(p, dt) {
-    const m = this.m;
-    let tgt = null, td = Infinity;
-    for (const q of m.players) {
-      if (q.state !== 'alive') continue;
-      const d = Math.hypot(q.x - p.x, q.z - p.z);
-      if (d < td) { td = d; tgt = q; }
-    }
-    p.anim = A.still;
-    p.v = 0;
-    if (!tgt) return;
-    const seen = m.players.some((q) => q.state === 'alive' && m.sees(q, p.x, 1.2, p.z));
-    p.seen = seen;
-    if (seen) return;
-    if (td > 1.0) this.moveTo(p, tgt.x, tgt.z, 6.5, dt);
-    p.anim = A.still;
-    p.h = turnTo(p.h, Math.atan2(tgt.x - p.x, tgt.z - p.z), 1);
-    p.grabT = (p.grabT || 0) - dt;
-    if (td < 1.3 && p.grabT <= 0) {
-      p.grabT = 1.2;
-      m.hurtPlayer(tgt, 22, { by: p, dir: [tgt.x - p.x, tgt.z - p.z] });
-      m.emit({ t: 'fx', k: 'grab', x: r2(p.x), z: r2(p.z), id: tgt.id });
-    }
-  }
-
   // ------------------------------------------------------------- every tick
   step(dt) {
     const m = this.m;
@@ -287,7 +259,6 @@ export class Crowd {
       if (p.kind === 'civ') this.stepCiv(p, dt);
       else if (p.kind === 'cop') this.stepCop(p, dt);
       else if (p.kind === 'gang') this.stepGang(p, dt);
-      else if (p.kind === 'mq') this.stepMannequin(p, dt);
       else if (p.kind === 'crew' && p.walkTo) {
         const left = this.moveTo(p, p.walkTo.x, p.walkTo.z, PED.run, dt);
         p.anim = left > 0.3 ? A.run : A.idle;

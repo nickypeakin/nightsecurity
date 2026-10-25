@@ -6,12 +6,12 @@
 // Both draw from one picture of the whole island, a pixel to a metre, with
 // a sharper picture of the city laid over it.
 
-import { BLOCKS, BUILDINGS, LINES, ROAD, HARBOR, PLACES } from '../shared/city.js';
+import { BLOCKS, BUILDINGS, GROUNDS, NODES, EDGES, CITY_EDGES, ROAD, HARBOR, PLACES } from '../shared/city.js';
+import { TOWN, GROUND as TOWN_GROUND } from '../shared/plan.js';
 import { GRID, HEIGHT, ROUTES, COUNTRY, SIGN, SUMMIT, PEAKS, LAKE, SEA_Y, desertness, waterY, shoreDist } from '../shared/world.js';
 import { cityMap } from './textures.js';
 import { COLORS } from './ui.js';
 
-const CK = 1024 / 480;          // the city picture: pixels per metre, from -240
 // the island picture: a pixel to a metre
 const ISL = { x0: GRID.x0, z0: GRID.z0, w: (GRID.nx - 1) * GRID.cell, h: (GRID.nz - 1) * GRID.cell };
 const SEA = '#16324a';
@@ -23,11 +23,21 @@ const BLIP = { dest: '#ffd040', check: '#ff4040', check2: '#a04040', car: '#5ab0
 
 // names on the big map: [text, x, z, size]
 const NAMES = [
-  ['KINGSGATE', 0, 10, 1.5], ['PELICAN BEACH', -480, -40, 1], ['KINGSGATE HILLS', -60, -560, 1.05], ['REDWATER DESERT', 60, -1150, 1.15],
+  ['SAN CIELO', (TOWN.x0 + TOWN.x1) / 2, (TOWN.z0 + TOWN.z1) / 2 - 40, 1.6], ['PELICAN BEACH', TOWN.x0 - 70, -120, 1], ['STARLIGHT HILLS', -140, -560, 1.05], ['REDWATER DESERT', 60, -1150, 1.15],
   ['LAKE CORRIGAN', LAKE.x, LAKE.z, 1], ['DUST CREEK', 330, -1290, 0.95], ['MOUNT CALDER', PEAKS[8][0] + 50, PEAKS[8][1] + 40, 1],
   ['MOUNT HARLOW', SUMMIT.x, SUMMIT.z + 60, 1.15], ['CEDAR FOREST', 120, -1960, 1], ['PORT KERRY', 0, -2500, 1.05], ['REDWATER AIRSTRIP', 70, -890, 0.75],
-  ['KINGSGATE INTERNATIONAL', -540, 345, 0.85],
+  ['SAN CIELO INTERNATIONAL', -690, 372, 0.85], ['EASTGATE SHORE', 640, -200, 0.9],
 ];
+
+// each district's name goes in the middle of its blocks
+const DISTRICTS = new Map();
+for (const b of BLOCKS) {
+  const d = DISTRICTS.get(b.name) || { x: 0, z: 0, n: 0 };
+  const a = (b.x1 - b.x0) * (b.z1 - b.z0);
+  d.x += (b.x0 + b.x1) / 2 * a; d.z += (b.z0 + b.z1) / 2 * a; d.n += a;
+  DISTRICTS.set(b.name, d);
+}
+for (const d of DISTRICTS.values()) { d.x /= d.n; d.z /= d.n; }
 
 // the island from above, a pixel to a metre
 let island = null;
@@ -107,7 +117,7 @@ export class Radar {
     this.x = canvas.getContext('2d');
     this.m = mapCanvas;
     this.mx = mapCanvas.getContext('2d');
-    this.img = cityMap({ BLOCKS, BUILDINGS, LINES, ROAD, HARBOR }).canvas;
+    this.img = cityMap({ TOWN, TOWN_GROUND, BLOCKS, GROUNDS, BUILDINGS, NODES, EDGES, CITY_EDGES, ROAD, HARBOR }).canvas;
     this.isl = islandPicture();
     this.t = 0;
     // the big map's view: centre and pixels per metre
@@ -164,7 +174,10 @@ export class Radar {
     const ex = Math.min(ISL.w, wx + reach - ISL.x0), ey = Math.min(ISL.h, wz + reach - ISL.z0);
     if (ex > sx && ey > sy) ctx.drawImage(this.isl, sx, sy, ex - sx, ey - sy, (ISL.x0 + sx - wx) * s, (ISL.z0 + sy - wz) * s, (ex - sx) * s, (ey - sy) * s);
     // the city, sharper
-    if (Math.abs(wx) < 240 + reach && Math.abs(wz) < 240 + reach) ctx.drawImage(this.img, (-240 - wx) * s, (-240 - wz) * s, 480 * s, 480 * s);
+    // (just the part in view, like the island)
+    const k = this.img.width / (TOWN.x1 - TOWN.x0);
+    const x0 = Math.max(TOWN.x0, wx - reach), x1 = Math.min(TOWN.x1, wx + reach), z0 = Math.max(TOWN.z0, wz - reach), z1 = Math.min(TOWN.z1, wz + reach);
+    if (x1 > x0 && z1 > z0) ctx.drawImage(this.img, (x0 - TOWN.x0) * k, (z0 - TOWN.z0) * k, (x1 - x0) * k, (z1 - z0) * k, (x0 - wx) * s, (z0 - wz) * s, (x1 - x0) * s, (z1 - z0) * s);
   }
 
   // blips: [{ x, z, k (kind), l (letter), c (colour) }]; players: [{ x, z,
@@ -270,12 +283,9 @@ export class Radar {
     if (k > 1.1 * dpr) {
       ctx.font = `bold ${Math.min(13 * dpr, k * 5)}px Inter, Arial, sans-serif`;
       ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      const named = new Set();
-      for (const b of BLOCKS) {
-        if (named.has(b.name)) continue;
-        named.add(b.name);
-        const [px, py] = P((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
-        ctx.fillText(b.name.toUpperCase(), px, py);
+      for (const [name, d] of DISTRICTS) {
+        const [px, py] = P(d.x, d.z);
+        ctx.fillText(name.toUpperCase(), px, py);
       }
     }
     for (const [key, l, col] of POIS) {

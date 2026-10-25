@@ -27,12 +27,11 @@ for (const f of ['geometries/RoundedBoxGeometry.js', 'environments/RoomEnvironme
 }
 copy(path.join(NM, 'peerjs', 'dist', 'peerjs.min.js'), path.join(OUT, 'vendor', 'peerjs.min.js'));
 
-// fonts: Anton (the logo), Bebas Neue (the big words), Special Elite, VT323
-// (the dispatcher) and Inter (everything else), latin subset only
+// fonts: Anton (the logo), Bebas Neue (the big words), VT323 (the police
+// radio) and Inter (everything else), latin subset only
 const fonts = [
   ['anton', 'latin-400.css', ['anton-latin-400-normal']],
   ['bebas-neue', 'latin-400.css', ['bebas-neue-latin-400-normal']],
-  ['special-elite', 'latin-400.css', ['special-elite-latin-400-normal']],
   ['inter', 'latin-400.css', ['inter-latin-400-normal']],
   ['inter', 'latin-600.css', ['inter-latin-600-normal']],
   ['vt323', 'latin-400.css', ['vt323-latin-400-normal']],

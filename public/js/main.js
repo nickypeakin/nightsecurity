@@ -35,8 +35,10 @@ const TIPS = [
   'Walk into a glowing door to go inside. Your bed saves the game.',
   "Hurt? A meal at Sal's Diner on the Strip puts you right for $15.",
   'Lose the police by getting out of their sight, or drive into Spray-N-Go.',
-  'Kingsgate Arms on the Strip sells pistols, SMGs, shotguns and body armour.',
-  'Thirteen security tapes from the old mall are hidden round the city. Each one pays $250.',
+  'Freedom Arms on the Strip sells pistols, SMGs, shotguns and body armour.',
+  'Twenty hidden packages are tucked away round San Cielo and the island. Each one pays $500.',
+  'Take the Hill Road north out of town for the Starlight sign, the desert and Mount Harlow.',
+  'Dre lives on your sofa. When he has an idea, the D on the radar lights up.',
   'Hold Space while driving for the handbrake. It helps round corners.',
   'Press M for the map. The big letters are the people with work for you.',
 ];
@@ -51,10 +53,10 @@ const attract = new Attract(world);
 const params = new URLSearchParams(location.search);
 // ?skip skips the opening (used by tests)
 const startAt = params.has('skip') ? 'skip' : 0;
-const SETTINGS_KEY = 'kingsgate-city';
-const SAVE_KEY = 'kingsgate-city-save';
+const SETTINGS_KEY = 'gta7-settings';
+const SAVE_KEY = 'gta7-san-cielo-save';
 const settings = { name: '', sens: 1, vol: 0.8, invert: false, voices: true, vhs: false, graphics: 'auto', bright: 1, radio: 0.6 };
-try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}); } catch { /* private mode */ }
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || localStorage.getItem('kingsgate-city')) || {}); } catch { /* private mode */ }
 const save = () => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ } };
 const loadGame = () => { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch { return null; } };
 const storeGame = (data) => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch { /* private mode */ } };
@@ -83,7 +85,6 @@ world.bright = settings.bright;
 
 const invited = (params.get('join') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
 if (invited) $('code').value = invited;
-document.fonts?.load('40px "Special Elite"').catch(() => {});
 document.fonts?.load('20px VT323').catch(() => {});
 
 // the continue button, if there's a game to continue
@@ -295,7 +296,7 @@ const actions = {
     else if (document.execCommand('copy')) done();
   },
   share() {
-    navigator.share?.({ title: 'GTA 7', text: 'Come and cause trouble in Kingsgate with me.', url: $('inviteLink').value }).catch(() => {});
+    navigator.share?.({ title: 'GTA 7', text: 'Come and cause trouble in San Cielo with me.', url: $('inviteLink').value }).catch(() => {});
   },
   start() { link?.send({ t: 'start' }); },
   leave: () => leave(),
@@ -425,7 +426,7 @@ document.addEventListener('pointerlockchange', () => {
     setPaused(false);
   } else if (!game.mapOpen && !game.shopOpen) {
     showScreen('pause');
-    setMsg('pauseNote', solo ? 'Your progress saves when you pass a job, find a tape, or walk into your place.' : "Heads up: the city keeps going for everyone else while you're paused.");
+    setMsg('pauseNote', solo ? 'Your progress saves when you pass a job, find a hidden package, or walk into your place.' : "Heads up: the city keeps going for everyone else while you're paused.");
     setPaused(true);
   }
 });

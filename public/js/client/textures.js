@@ -223,7 +223,7 @@ export const floorTex = (kind) => cached(`floor:${kind}`, () => {
   return toTexture(c);
 });
 
-// the guns on Kingsgate Arms' back wall: pegboard and silhouettes
+// the guns on Freedom Arms' back wall: pegboard and silhouettes
 export const gunWall = () => cached('gunWall', () => {
   const W = 1024, H = 256, rng = makeRng('gunWall');
   const [c, x] = canvas(W, H, 1);
@@ -417,6 +417,37 @@ export function sign(text, { w = 512, h = 128, bg = '#1d3b2a', fg = '#f2f0e6', f
   });
 }
 
+// Lots of little signs on a few big pictures (the shop fronts: hundreds of
+// them, one draw a block of town instead of one each). entries: [{ text,
+// bg, fg, font, glow }], laid out `cols` by `rows` to a page, each sw by
+// sh. Returns the pages.
+export function signAtlas(entries, { sw = 384, sh = 64, cols = 5, rows = 32 } = {}) {
+  const per = cols * rows, pages = [];
+  for (let p = 0; p * per < entries.length; p++) {
+    const [c, x] = canvas(sw * cols, sh * rows);
+    for (let k = 0; k < per && p * per + k < entries.length; k++) {
+      const e = entries[p * per + k];
+      const ox = (k % cols) * sw, oy = Math.floor(k / cols) * sh;
+      x.save();
+      x.beginPath(); x.rect(ox, oy, sw, sh); x.clip();
+      x.fillStyle = e.bg;
+      x.fillRect(ox, oy, sw, sh);
+      x.fillStyle = e.fg;
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      let size = parseFloat(/(\d+)px/.exec(e.font)?.[1] || 64) * sh / 128;
+      const fit = () => { x.font = e.font.replace(/\d+px/, `${size.toFixed(0)}px`); };
+      fit();
+      while (x.measureText(e.text).width > sw * 0.9 && size > 8) { size *= 0.92; fit(); }
+      if (e.glow) { x.shadowColor = e.fg; x.shadowBlur = 18 * sh / 128; }
+      x.fillText(e.text, ox + sw / 2, oy + sh / 2);
+      x.restore();
+    }
+    pages.push(toTexture(c, { repeat: false }));
+  }
+  return pages;
+}
+
 // a radial glow for light sprites
 export const glow = () => cached('glow', () => {
   const S = 64;
@@ -464,28 +495,39 @@ export const sky = () => cached('sky', () => {
 
 // -------------------------------------------------------- HUD and pickups --
 // the city map, drawn from above (for the radar and the pause map)
-export function cityMap({ BLOCKS, BUILDINGS, LINES, ROAD, HARBOR }, size = 1024) {
-  return cached(`citymap:${size}`, () => {
-    const [c, x] = canvas(size, size, 1);
-    const k = size / 480, o = 240;
-    const P = (v) => (v + o) * k;
-    // (just the city: the island round it is the radar's own picture)
-    x.clearRect(0, 0, size, size);
-    x.fillStyle = '#34383c';
-    x.fillRect(P(-209), P(-209), 418 * k, 418 * k);
+// The city from above for the radar and the map, `k` pixels a metre over
+// the town's bounding box (TOWN); outside its ground it's left clear, for
+// the island picture underneath.
+export function cityMap({ TOWN, TOWN_GROUND, BLOCKS, GROUNDS, BUILDINGS, NODES, EDGES, CITY_EDGES, ROAD, HARBOR }, k = 2) {
+  return cached(`citymap:${k}`, () => {
+    const W = Math.ceil((TOWN.x1 - TOWN.x0) * k), H = Math.ceil((TOWN.z1 - TOWN.z0) * k);
+    const [c, x] = canvas(W, H, 1);
+    const R = (x0, z0, x1, z1) => [(x0 - TOWN.x0) * k, (z0 - TOWN.z0) * k, (x1 - x0) * k, (z1 - z0) * k];
+    x.clearRect(0, 0, W, H);
+    // sidewalks under everything, then each block's own colour
     x.fillStyle = '#4a4c50';
-    x.fillRect(P(HARBOR.x0), P(HARBOR.z0), (HARBOR.x1 - HARBOR.x0) * k, (HARBOR.z1 - HARBOR.z0) * k);
+    for (const r of TOWN_GROUND) x.fillRect(...R(r.x0, r.z0, r.x1, r.z1));
+    x.fillStyle = '#55575a';
+    x.fillRect(...R(HARBOR.x0, HARBOR.z0, HARBOR.x1, HARBOR.z1));
+    const BLOCK = { mansions: '#35502e', estate: '#35502e', res: '#33482c', home: '#33482c', flats: '#3c4234', park: '#2c4e2c', beach: '#7a7058' };
     for (const b of BLOCKS) {
-      x.fillStyle = { res: '#2e3e26', safe: '#2e3e26', park: '#26462a' }[b.kind] || '#3e4044';
-      x.fillRect(P(b.x0 - 3), P(b.z0 - 3), (b.x1 - b.x0 + 6) * k, (b.z1 - b.z0 + 6) * k);
+      x.fillStyle = BLOCK[b.kind] || '#3e4044';
+      x.fillRect(...R(b.x0 - 3, b.z0 - 3, b.x1 + 3, b.z1 + 3));
     }
+    const PAVE = { grass: '#2f4c2c', path: '#6a6658', concrete: '#4c4e52', plaza: '#5c5a52', asphalt: '#2c2e32', dirt: '#5a4a36', quay: '#55575a' };
+    for (const g of GROUNDS) {
+      if (!PAVE[g.kind]) continue;
+      x.fillStyle = PAVE[g.kind];
+      x.fillRect(...R(g.x0, g.z0, g.x1, g.z1));
+    }
+    // the streets (straight, so a box each) and their junctions
     x.fillStyle = '#1a1c20';
-    for (const L of LINES) {
-      x.fillRect(P(L - ROAD), P(-200 - ROAD), ROAD * 2 * k, 400 * k + ROAD * 2 * k);
-      x.fillRect(P(-200 - ROAD), P(L - ROAD), 400 * k + ROAD * 2 * k, ROAD * 2 * k);
+    for (let e = 0; e < CITY_EDGES; e++) {
+      const a = NODES[EDGES[e].a], b = NODES[EDGES[e].b];
+      x.fillRect(...R(Math.min(a.x, b.x) - ROAD, Math.min(a.z, b.z) - ROAD, Math.max(a.x, b.x) + ROAD, Math.max(a.z, b.z) + ROAD));
     }
-    x.fillStyle = '#6a6c70';
-    for (const b of BUILDINGS) x.fillRect(P(b.x0), P(b.z0), (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+    x.fillStyle = '#7a7c80';
+    for (const b of BUILDINGS) if (b.x1 > TOWN.x0 && b.x0 < TOWN.x1 && b.z1 > TOWN.z0 && b.z0 < TOWN.z1) x.fillRect(...R(b.x0, b.z0, b.x1, b.z1));
     const t = toTexture(c, { repeat: false });
     t.canvas = c;
     return t;

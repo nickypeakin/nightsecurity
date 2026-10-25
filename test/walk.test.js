@@ -1,18 +1,19 @@
 // Checks the city and the island itself, without running them: every lane,
 // junction and parking space has room for a car; the pavements, crossings
 // and every named place have room for a person; everywhere that matters
-// (the jobs, the tapes, the pickups) can be walked to from your place; the
+// (the jobs, the hidden packages, the pickups) can be walked to from your place; the
 // traffic lights never show green both ways; the highways reach every part
 // of the island and stay out of the sea; and the car physics drives, brakes,
 // steers, slides, crashes and climbs hills the way it should.
 //
 // usage: node test/walk.test.js
 
-import { NODES, EDGES, CITY_EDGES, EXITS, lane, light, hasLights, CYCLE, PARKING, WALK_NODES, PLACES, BUILDINGS, LAMPS, onRoad, areaName, makeSolids, openAt, groundY, inWater } from '../public/js/shared/city.js';
+import { NODES, EDGES, CITY_EDGES, EXITS, lane, light, hasLights, CYCLE, PARKING, WALK_NODES, PLACES, BUILDINGS, BLOCKS, LAMPS, onRoad, areaName, makeSolids, openAt, groundY, inWater, inTown, XS, ZS } from '../public/js/shared/city.js';
+import { TOWN } from '../public/js/shared/plan.js';
 import { ROUTES, COUNTRY, FLORA, PEAKS, SUMMIT, LAKE, SEA_Y, ROOMS_BOX, heightAt, shoreDist, lakeQ } from '../public/js/shared/world.js';
 import { makeCar, stepCar, CAR_TYPES } from '../public/js/shared/car.js';
 import { carVsBox, carVsCar } from '../public/js/shared/collide.js';
-import { MISSIONS, TAPES } from '../public/js/shared/story.js';
+import { MISSIONS, PACKAGES, PICKUPS } from '../public/js/shared/story.js';
 import { PLAYER_R } from '../public/js/shared/config.js';
 import { INTERIORS, INTERIOR, interiorAt, worldSolids, IX } from '../public/js/shared/interiors.js';
 import { FIXTURES } from '../public/js/shared/lights.js';
@@ -30,8 +31,12 @@ const carBlocked = (type, x, z, h) => {
 // ------------------------------------------------------------ the roads
 {
   console.log('roads');
-  check(NODES.filter((n) => n.city).length === 36 && CITY_EDGES === 60, `a 6 by 6 grid of streets in town (${CITY_EDGES} streets)`);
-  check(EXITS.length === 5 && NODES.length > 300, `and highways out of town on all sides (${EXITS.length} ways out, ${NODES.length} junctions in all)`);
+  const cityNodes = NODES.filter((n) => n.city).length;
+  check(cityNodes >= 100 && CITY_EDGES >= 180, `a big city of streets (${cityNodes} junctions, ${CITY_EDGES} streets)`);
+  check(EXITS.length >= 5 && NODES.length > 400, `and highways out of town on all sides (${EXITS.length} ways out, ${NODES.length} junctions in all)`);
+  const kinds = new Set(BLOCKS.map((b) => b.kind));
+  check(['beach', 'mansions', 'starlight', 'down', 'park', 'flats', 'docks', 'mill'].every((k) => kinds.has(k)), 'beach, hills, the Strip, downtown, the park, the Flats, the docks');
+  check(new Set(BLOCKS.map((b) => b.name)).size >= 10, `named districts (${[...new Set(BLOCKS.map((b) => b.name))].join(', ')})`);
   let samples = 0, bad = 0, off = 0;
   for (const e of EDGES) {
     for (const from of [e.a, e.b]) {
@@ -62,7 +67,7 @@ const carBlocked = (type, x, z, h) => {
   }
   check(both === 0, 'the lights never let both ways go at once');
   check(red > 0, 'and have an all-red moment between');
-  check(NODES.filter((n) => hasLights(n.id)).length >= 30, 'nearly every junction in town has lights');
+  check(NODES.filter((n) => hasLights(n.id)).length >= 80, 'nearly every junction in town has lights');
   check(NODES.every((n) => n.city || !hasLights(n.id)), "and there aren't any out on the highways");
   // you can drive from anywhere to anywhere, and never hit a dead end
   const seen = new Set([0]), q = [0];
@@ -91,7 +96,7 @@ const carBlocked = (type, x, z, h) => {
     }
     for (let j = i + 1; j < cars.length; j++) if (Math.abs(cars[i].x - cars[j].x) < 7 && Math.abs(cars[i].z - cars[j].z) < 7 && carVsCar(cars[i], cars[j])) overlap++;
   });
-  check(PARKING.length >= 80, `plenty of parking (${PARKING.length})`);
+  check(PARKING.length >= 300, `plenty of parking (${PARKING.length})`);
   check(bad === 0, `every space has room for a van (${bad} blocked)`);
   check(inLane === 0, `no space sits in a traffic lane (${inLane})`);
   check(overlap === 0, `no two spaces overlap (${overlap})`);
@@ -100,7 +105,7 @@ const carBlocked = (type, x, z, h) => {
 // ------------------------------------------------------------ pavements
 {
   console.log('pavements');
-  check(WALK_NODES.length >= 100, `a walking network (${WALK_NODES.length} corners)`);
+  check(WALK_NODES.length >= 300, `a walking network (${WALK_NODES.length} corners)`);
   const blockedNodes = WALK_NODES.filter((n) => !openAt(solids, n.x, n.z, 0.3));
   check(blockedNodes.length === 0, `every corner has room to stand (${blockedNodes.length} blocked${blockedNodes.length ? `, e.g. ${blockedNodes[0].x.toFixed(1)}, ${blockedNodes[0].z.toFixed(1)}` : ''})`);
   let samples = 0, blocked = 0, crossings = 0;
@@ -116,24 +121,25 @@ const carBlocked = (type, x, z, h) => {
       }
     }
   }
-  check(crossings >= 60, `crossings between blocks (${crossings})`);
+  check(crossings >= 200, `crossings between blocks (${crossings})`);
   check(blocked / samples < 0.04, `the pavements are clear enough to walk (${blocked} of ${samples} spots have something in the way)`);
   check(WALK_NODES.every((n) => n.links.length >= 2), 'no dead ends');
-  check(LAMPS.length >= 150, `street lamps (${LAMPS.length})`);
+  check(LAMPS.length >= 600, `street lamps (${LAMPS.length})`);
 }
 
 // ------------------------------------------------------------ getting about on foot
 // flood the city (and a little way out of it) on a half-metre grid from
 // your place: everywhere a person fits and can reach
-const BOUND = 250;
-const R = 0.5, W = Math.ceil((BOUND * 2) / R);
-const reach = new Uint8Array(W * W);
+const FX0 = TOWN.x0 - 30, FZ0 = TOWN.z0 - 30;
+const R = 0.5, W = Math.ceil((TOWN.x1 - TOWN.x0 + 60) / R), D = Math.ceil((TOWN.z1 - TOWN.z0 + 60) / R);
+const reach = new Uint8Array(W * D);
 {
   console.log('getting about on foot');
-  const idx = (x, z) => (x < -BOUND || z < -BOUND || x >= BOUND || z >= BOUND ? -1 : Math.floor((z + BOUND) / R) * W + Math.floor((x + BOUND) / R));
-  const fits = new Int8Array(W * W).fill(-1);
+  const t0 = performance.now();
+  const idx = (x, z) => (x < FX0 || z < FZ0 || x >= FX0 + W * R || z >= FZ0 + D * R ? -1 : Math.floor((z - FZ0) / R) * W + Math.floor((x - FX0) / R));
+  const fits = new Int8Array(W * D).fill(-1);
   const fit = (i) => {
-    if (fits[i] < 0) { const x = -BOUND + (i % W + 0.5) * R, z = -BOUND + (Math.floor(i / W) + 0.5) * R; fits[i] = openAt(solids, x, z, PLAYER_R) ? 1 : 0; }
+    if (fits[i] < 0) { const x = FX0 + (i % W + 0.5) * R, z = FZ0 + (Math.floor(i / W) + 0.5) * R; fits[i] = !inWater(x, z) && openAt(solids, x, z, PLAYER_R) ? 1 : 0; }
     return fits[i];
   };
   const start = idx(PLACES.safehouse.x, PLACES.safehouse.z + 1.5);
@@ -144,7 +150,7 @@ const reach = new Uint8Array(W * W);
     const i = q.pop();
     const ix = i % W;
     for (const j of [ix > 0 ? i - 1 : -1, ix < W - 1 ? i + 1 : -1, i - W, i + W]) {
-      if (j < 0 || j >= W * W || reach[j] || !fit(j)) continue;
+      if (j < 0 || j >= W * D || reach[j] || !fit(j)) continue;
       reach[j] = 1;
       q.push(j);
     }
@@ -153,22 +159,25 @@ const reach = new Uint8Array(W * W);
   const reachable = (x, z, r = 1.5) => {
     for (let dz = -r; dz <= r; dz += R) for (let dx = -r; dx <= r; dx += R) {
       const i = idx(x + dx, z + dz);
-      if (i >= 0 && i < W * W && reach[i]) return true;
+      if (i >= 0 && i < W * D && reach[i]) return true;
     }
     return false;
   };
+  let area = 0;
+  for (let i = 0; i < reach.length; i++) area += reach[i];
+  console.log(`  ${(area * R * R / 1e4).toFixed(1)} hectares you can walk about in (${((performance.now() - t0) / 1000).toFixed(1)} s)`);
   let n = 0;
   for (const [key, p] of Object.entries(PLACES)) {
     n++;
     check(reachable(p.x, p.z), `you can walk to ${p.name} (${key})`);
   }
-  TAPES.forEach(([x, z], i) => {
-    check(openAt(solids, x, z, 0.3), `tape ${i + 1} isn't inside anything (${x}, ${z})`);
-    check(reachable(x, z, 1.0), `tape ${i + 1} can be reached (${x}, ${z})`);
+  check(PACKAGES.length === 20 && new Set(PACKAGES.map(String)).size === 20, `twenty hidden packages, all in different places (${PACKAGES.length})`);
+  PACKAGES.forEach(([x, z], i) => {
+    check(openAt(solids, x, z, 0.3) && !inWater(x, z), `package ${i + 1} isn't inside anything (${x}, ${z})`);
+    if (inTown(x, z)) check(reachable(x, z, 1.0), `package ${i + 1} can be reached (${x}, ${z})`);
   });
-  for (const [x, z] of [[-150, 152], [15, 231], [158, -128], [0.5, -3.5], [-88, 84], [PLACES.hospital.x + 3, PLACES.hospital.z], [PLACES.police.x + 4, PLACES.police.z]]) {
-    check(reachable(x, z, 1.0), `the pickup at ${x}, ${z} can be reached`);
-  }
+  check(PACKAGES.filter(([x, z]) => !inTown(x, z)).length >= 6, 'some of them out on the island');
+  for (const [kind, x, z] of PICKUPS) check(reachable(x, z, 1.0), `the ${kind} pickup at ${x.toFixed(1)}, ${z.toFixed(1)} can be reached`);
   check(reachable(PLACES.hospital.x, PLACES.hospital.z + 1) && reachable(PLACES.police.x, PLACES.police.z + 1), 'you come back somewhere you can walk from');
   for (const r of INTERIORS) check(reachable(r.door.x, r.door.z, 0.5), `you can walk up to the door of ${r.name}`);
   void n;
@@ -251,8 +260,9 @@ const reach = new Uint8Array(W * W);
 {
   console.log('driving');
   const empty = { solids: makeSolids(), cars: [] };
-  // straight down x = 40 southbound lane (heading 0 is +z)
-  const L = lane(EDGES.find((e) => e.axis === 'z' && NODES[e.a].x === 40 && NODES[e.a].z === -200).id, NODES.find((n) => n.x === 40 && n.z === -200).id);
+  // straight down the x = 20 southbound lane (heading 0 is +z)
+  const top = NODES.find((n) => n.city && n.x === XS[7] && n.z === ZS[0]);
+  const L = lane(EDGES.find((e) => e.axis === 'z' && e.a === top.id).id, top.id);
   const c = makeCar(1, 'sedan', L.x0, L.z0, L.h);
   for (let t = 0; t < 4; t += 1 / 60) stepCar(c, { throttle: 1, steer: 0 }, 1 / 60, empty);
   check(c.v > 17 && c.v < CAR_TYPES.sedan.top, `a Marlin gets going (${c.v.toFixed(1)} m/s after 4 s)`);
@@ -265,13 +275,14 @@ const reach = new Uint8Array(W * W);
   for (let t = 0; t < 2; t += 1 / 60) stepCar(c, { throttle: -1, steer: 0 }, 1 / 60, empty);
   check(c.v < -3 && c.v > -CAR_TYPES.sedan.top * 0.31, `reverse (${c.v.toFixed(1)} m/s)`);
   // turning right lowers the heading
-  const d = makeCar(2, 'sports', 0, -160, Math.PI / 2);
+  const SZ = ZS[3] + 2.6;   // the eastbound lane of a street right across town
+  const d = makeCar(2, 'sports', 0, SZ, Math.PI / 2);
   d.v = 10;
   const h0 = d.h;
   for (let t = 0; t < 1; t += 1 / 60) stepCar(d, { throttle: 0.3, steer: 1 }, 1 / 60, null);
   check(d.h < h0 - 0.5, `steering right turns right (${(d.h - h0).toFixed(2)} rad)`);
   // the handbrake slides
-  const e = makeCar(3, 'sports', 0, -160, Math.PI / 2), f = makeCar(4, 'sports', 0, -160, Math.PI / 2);
+  const e = makeCar(3, 'sports', 0, SZ, Math.PI / 2), f = makeCar(4, 'sports', 0, SZ, Math.PI / 2);
   e.v = f.v = 25;
   let se = 0, sf = 0;
   for (let t = 0; t < 1; t += 1 / 60) { stepCar(e, { throttle: 0.5, steer: 1, handbrake: true }, 1 / 60, null); stepCar(f, { throttle: 0.5, steer: 1 }, 1 / 60, null); se = Math.max(se, Math.abs(e.s)); sf = Math.max(sf, Math.abs(f.s)); }
@@ -290,7 +301,7 @@ const reach = new Uint8Array(W * W);
   check(inside < 0.5, `and the wall holds (${inside.toFixed(2)} m in)`);
   check(Math.abs(g.v) < 8, `and stops you (${g.v.toFixed(1)} m/s)`);
   // a shunt: the car in front gets pushed along
-  const back = makeCar(6, 'van', 0, -165, Math.PI / 2), front = makeCar(7, 'sedan', 5.4, -165, Math.PI / 2);
+  const back = makeCar(6, 'van', 0, SZ, Math.PI / 2), front = makeCar(7, 'sedan', 5.4, SZ, Math.PI / 2);
   back.v = 15;
   const env = { solids: empty.solids, cars: [front], canPush: () => true };
   for (let t = 0; t < 0.6; t += 1 / 60) stepCar(back, { throttle: 0, steer: 0 }, 1 / 60, env);
@@ -316,12 +327,12 @@ const reach = new Uint8Array(W * W);
 // ------------------------------------------------------------ the island
 {
   console.log('the island');
-  const flat = [[0, 0], [-150, 150], [190, -190], [0, 230]].every(([x, z]) => Math.abs(groundY(x, z)) < 0.2);
+  const flat = [[20, -150], [-260, 60], [240, -300], [160, 222], [-500, -220], [480, -150]].every(([x, z]) => Math.abs(groundY(x, z)) < 0.2);
   check(flat, 'the city is flat');
   // sea all round the edge
   let wet = 0, n = 0;
-  for (let x = -990; x <= 910; x += 50) for (const z of [-2790, 425]) { if (x > ROOMS_BOX.x0 - 5 && x < ROOMS_BOX.x1 + 5) continue; n++; if (inWater(x, z)) wet++; }
-  for (let z = -2790; z <= 425; z += 50) for (const x of [-990, 910]) { n++; if (inWater(x, z)) wet++; }
+  for (let x = -980; x <= 900; x += 50) for (const z of [-2780, 500]) { if (x > ROOMS_BOX.x0 - 5 && x < ROOMS_BOX.x1 + 5) continue; n++; if (inWater(x, z)) wet++; }
+  for (let z = -2780; z <= 500; z += 50) for (const x of [-980, 900]) { n++; if (inWater(x, z)) wet++; }
   check(wet === n, `the sea all the way round (${wet} of ${n})`);
   check(SUMMIT.y > 250 && Math.hypot(SUMMIT.x - PEAKS[0][0], SUMMIT.z - PEAKS[0][1]) < 150, `Mount Harlow towers over everything (${SUMMIT.y.toFixed(0)} m)`);
   check(inWater(LAKE.x, LAKE.z) && heightAt(LAKE.x, LAKE.z) < LAKE.y - 3 && !inWater(LAKE.x, LAKE.z + LAKE.rz * 1.6), 'Lake Corrigan, with a shore round it');
@@ -333,7 +344,7 @@ const reach = new Uint8Array(W * W);
       pts++;
       if (b.y < SEA_Y + 1 || inWater(b.x, b.z)) low++;
       if (Math.abs(b.y - a.y) / (b.s - a.s) > 0.12) steep++;
-      if (Math.abs(groundY(b.x, b.z) - b.y) > 0.3 && Math.abs(b.x) > 215) wetLane++;
+      if (Math.abs(groundY(b.x, b.z) - b.y) > 0.3 && !inTown(b.x, b.z)) wetLane++;
     }
   }
   check(low === 0, `the highways stay out of the water (${low} of ${pts} points)`);
@@ -342,7 +353,7 @@ const reach = new Uint8Array(W * W);
   check(ROUTES.reduce((s, r) => s + r.len, 0) > 8000, `kilometres of highway (${(ROUTES.reduce((s, r) => s + r.len, 0) / 1000).toFixed(1)} km)`);
   // the towns
   const towns = new Set(COUNTRY.towns.map((t) => t.name));
-  check(['Pelican Beach', 'Dust Creek', 'Port Kerry'].every((t) => towns.has(t)), 'towns out of town');
+  check(['Dust Creek', 'Port Kerry'].every((t) => towns.has(t)), 'towns out of town');
   let tilted = 0, sunk = 0;
   for (const b of COUNTRY.buildings) {
     if (b.onPier) continue;
@@ -356,12 +367,13 @@ const reach = new Uint8Array(W * W);
   check(groundY((P.x0 + P.x1) / 2, (P.z0 + P.z1) / 2) === P.y && inWater(P.x0 + 5, P.z0 - 3) && !inWater(P.x0 + 5, (P.z0 + P.z1) / 2), 'the pier runs out over the sea, and you can walk on it');
   // where you are
   const at = (x, z) => areaName(x, z);
-  check(at(-330, 40) === 'Pelican Beach' && at(0, -2560) === 'Port Kerry' && at(SUMMIT.x, SUMMIT.z) === 'Mount Harlow' && at(LAKE.x, LAKE.z) === 'Lake Corrigan' && at(-100, -420) === 'Kingsgate Hills', 'the island has names');
+  check(at(-560, 40) === 'Pelican Beach' && at(0, -2560) === 'Port Kerry' && at(SUMMIT.x, SUMMIT.z) === 'Mount Harlow' && at(LAKE.x, LAKE.z) === 'Lake Corrigan' && at(-140, -560) === 'Starlight Hills' && at(-690, 300) === 'San Cielo International', 'the island has names');
+  check(at(20, -150) === 'Downtown' && at(PLACES.terminal.x, PLACES.terminal.z) === 'The Docks', 'and so do the parts of town');
   check(lakeQ(LAKE.x, LAKE.z) < 0.5, '(the lake is where it says)');
   // you can't see through a mountain
   const S = SUMMIT;
   check(!solids.clear(S.x - 400, 2, S.z, S.x + 400, 2, S.z), "hills block the view (and the bullets)");
-  check(solids.clear(-100, 1.6, -120, 100, 1.6, -120), 'but a straight street in town does not');
+  check(solids.clear(-100, 1.6, ZS[3], 100, 1.6, ZS[3]), 'but a straight street in town does not');
 }
 
 // ------------------------------------------------------------ hills and the sea
@@ -385,14 +397,14 @@ const reach = new Uint8Array(W * W);
     while (c.v > 0.5 && d < 300) { const px = c.x, pz = c.z; stepCar(c, { throttle: 0, steer: 0 }, 1 / 60, env); d += Math.hypot(c.x - px, c.z - pz); }
     return d;
   };
-  const dUp = coast(mid.x, mid.z, h), dFlat = coast(0, -40 + 2.6, Math.PI / 2);
+  const dUp = coast(mid.x, mid.z, h), dFlat = coast(-400, ZS[3] + 2.6, Math.PI / 2);
   check(dUp < dFlat * 0.75, `coasting up a hill you stop sooner (${dUp.toFixed(0)} m, against ${dFlat.toFixed(0)} m on the flat; a ${(Math.abs(best.g) * 100).toFixed(0)}% grade)`);
   const d = makeCar(2, 'sedan', mid.x, mid.z, h);
   const y0 = d.y;
   for (let t = 0; t < 2; t += 1 / 60) stepCar(d, { throttle: 1, steer: 0 }, 1 / 60, env);
   check(d.v > 8 && d.y > y0 + 1, `and drives on up it (${d.v.toFixed(1)} m/s, ${(d.y - y0).toFixed(1)} m up)`);
   // flat out at the sea from the beach: the water's edge stops you
-  const e = makeCar(3, 'sports', -335, 120, -Math.PI / 2);
+  const e = makeCar(3, 'sports', TOWN.x0 - 15, -5, -Math.PI / 2);
   e.v = 30;
   let hit = 0;
   for (let t = 0; t < 4; t += 1 / 60) stepCar(e, { throttle: 1, steer: 0 }, 1 / 60, { ...env, onHit: (car, n) => { hit = Math.max(hit, n); } });

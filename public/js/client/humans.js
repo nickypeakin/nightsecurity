@@ -1,13 +1,11 @@
 // People. Every character is built in code from smooth lofted shapes: a
 // shaped torso, tapered limbs, hands with fingers, a sculpted head with
 // eyes that blink, hair and clothes. Nothing is a box. The origin is
-// between the feet and they face +z. (From Cinder Peak; at Kingsgate the
-// same bodies, cast in plastic, are the mannequins.)
+// between the feet and they face +z. (From Cinder Peak.)
 //
 // A person is a small rig of joints (pelvis, spine, neck, head, shoulders,
 // elbows, hips, knees) that `Rig.update` poses each frame: walking,
-// standing, sitting, knocking, talking, looking around, and the stiff,
-// unblinking stillness of someone who isn't themselves any more.
+// standing, sitting, driving, aiming, talking, looking around.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -377,27 +375,18 @@ function eyeMat(iris, glint = false) {
 // ----------------------------------------------------------------- looks --
 // Skin tones, hair, clothes. `top` and `bottom` pick the garments below.
 export const LOOKS = {
-  // the four guards, in player-colour order: Gatehouse Security navy
-  // the four of you, out of uniform now the mall's gone
+  // the four of you, in player-colour order (Zay first)
   friend0: { sex: 'm', skin: 0xdcae8a, iris: 0x4a3423, hair: 'short', hairColor: 0x2a1a10, top: 'jacket', topColor: 0x3a2418, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.8 },
   friend1: { sex: 'f', skin: 0x8a5638, iris: 0x2d1d12, hair: 'bun', hairColor: 0x120c09, top: 'bomber', topColor: 0x4a5a3a, inner: 0x1e1e1e, bottom: 'jeans', bottomColor: 0x1a1c22, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.67 },
   friend2: { sex: 'm', skin: 0xb77a52, iris: 0x3b2817, hair: 'buzz', hairColor: 0x15100c, top: 'hoodie', topColor: 0x5a5a62, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0x1a1a1a, height: 1.84 },
   friend3: { sex: 'f', skin: 0xf0c8a6, iris: 0x45708a, hair: 'pony', hairColor: 0x9a4a2a, top: 'jacket', topColor: 0x5a7fa8, bottom: 'trousers', bottomColor: 0x141416, shoes: 'boot', shoeColor: 0x141414, height: 1.64 },
-  // Ray Okafor, the mall manager
+  // Ray Okafor, who sells cars in Eastgate
   manager: { sex: 'm', skin: 0x5a3a28, iris: 0x1a120c, hair: 'buzz', hairColor: 0x2a2a28, glasses: true, top: 'suit', topColor: 0x34363c, inner: 0xe8e8e2, tie: 0x8a1a2a, bottom: 'trousers', bottomColor: 0x2a2c30, shoes: 'dress', shoeColor: 0x0e0e0e, height: 1.83, heavy: 1.05 },
-  // Dale Mercer, nineteen years on nights, in his undershirt: it took his jacket
-  dale: { sex: 'm', skin: 0xe0b898, iris: 0x4a5a6a, hair: 'balding', hairColor: 0x9a9a96, mustache: true, glasses: true, old: true, top: 'tee', topColor: 0xe8e4d8, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.76, heavy: 1.06 },
-  // Halvorsen's mannequins: plastic all through, some dressed for a window
-  mq0: { sex: 'f', skin: 0xeee9df, plastic: true, hairColor: 0xeee9df, bare: true, top: 'tee', topColor: 0xeee9df, bottom: 'trousers', bottomColor: 0xeee9df, shoes: 'flat', shoeColor: 0xeee9df, height: 1.78 },
-  mq1: { sex: 'm', skin: 0xeee9df, plastic: true, hairColor: 0xeee9df, bare: true, top: 'tee', topColor: 0xeee9df, bottom: 'trousers', bottomColor: 0xeee9df, shoes: 'flat', shoeColor: 0xeee9df, height: 1.86 },
-  mq2: { sex: 'f', skin: 0xe2d4c0, plastic: true, hairColor: 0xe2d4c0, top: 'coat', topColor: 0x7a2228, bottom: 'skirt', bottomColor: 0x1a1a1e, legs: 0xe2d4c0, shoes: 'dress', shoeColor: 0x1a1010, height: 1.8 },
-  mq3: { sex: 'm', skin: 0xe2d4c0, plastic: true, hairColor: 0xe2d4c0, top: 'suit', topColor: 0x2a2c34, inner: 0xe8e8e2, tie: 0x2a3a6a, bottom: 'trousers', bottomColor: 0x24262c, shoes: 'dress', shoeColor: 0x0e0e0e, height: 1.88 },
-  mq4: { sex: 'f', skin: 0x48484a, plastic: true, hairColor: 0x48484a, top: 'sweater', topColor: 0xc8b090, bottom: 'longskirt', bottomColor: 0x3a3a4a, legs: 0x48484a, shoes: 'flat', shoeColor: 0x2a2a2a, height: 1.79 },
-  mq5: { sex: 'm', skin: 0x48484a, plastic: true, hairColor: 0x48484a, top: 'bomber', topColor: 0x3a4a3a, inner: 0x1e1e1e, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.85 },
-  // the one in Dale's uniform
-  mqGuard: { sex: 'm', skin: 0xeee9df, plastic: true, hairColor: 0xeee9df, hat: 'police', hatColor: 0x1e2636, top: 'uniform', topColor: 0x2c3a52, bottom: 'trousers', bottomColor: 0x1c2028, shoes: 'boot', shoeColor: 0x141414, height: 1.86 },
+  // Dre: green hoodie, cap on backwards, never still
+  dre: { sex: 'm', skin: 0x6a4430, iris: 0x1e140c, hair: 'buzz', hairColor: 0x120c09, hat: 'cap', hatColor: 0x1a1a1a, top: 'hoodie', topColor: 0x2a6a3a, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xf2f2ee, height: 1.78 },
+  // Vince Moreno, retired: grey, tanned, a good suit and no tie
+  vince: { sex: 'm', skin: 0xd8a07a, iris: 0x3a2a1a, hair: 'slick', hairColor: 0x9a9890, glasses: true, old: true, top: 'suit', topColor: 0xd8d0c0, inner: 0x4a6a8a, bottom: 'trousers', bottomColor: 0xd8d0c0, shoes: 'dress', shoeColor: 0x4a2a1a, height: 1.82, heavy: 1.06 },
 };
-export const MANNEQUIN_LOOKS = ['mq0', 'mq1', 'mq2', 'mq3', 'mq4', 'mq5'];
 export const FRIEND_LOOKS = ['friend0', 'friend1', 'friend2', 'friend3'];
 
 // ------------------------------------------------------------------ build --
@@ -860,75 +849,11 @@ function bake(group) {
   }
 }
 
-// A baked figure is drawn in as few pieces as possible: everything without
-// a picture on it shares one of a few plain materials, its colour carried
-// in the vertices (a dozen mannequins in a window were a hundred-odd draw
-// calls otherwise).
-const bakedMats = new Map();
-function bakedMat(m) {
-  if (m.map || m.alphaMap || m.transparent) return null;
-  if (m.emissive && m.emissive.r + m.emissive.g + m.emissive.b > 0.001) return null;
-  const r = m.roughness < 0.45 ? 0.3 : m.roughness < 0.75 ? 0.6 : 0.85, mt = m.metalness > 0.35 ? 0.6 : 0;
-  const k = `${r}:${mt}:${m.side}:${m.polygonOffset ? 1 : 0}`;
-  if (!bakedMats.has(k)) {
-    const b = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: r, metalness: mt, side: m.side });
-    if (m.polygonOffset) { b.polygonOffset = true; b.polygonOffsetFactor = -2; b.polygonOffsetUnits = -2; }
-    bakedMats.set(k, b);
-  }
-  return bakedMats.get(k);
-}
-
-// A posed person as a handful of static meshes: for the mannequins,
-// which only change pose when nobody's looking.
-export function bakePose(root, into = null) {
-  root.updateMatrixWorld(true);
-  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
-  const byMat = new Map();
-  root.traverse((o) => {
-    if (!o.isMesh || !o.visible) return;
-    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
-    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) g.deleteAttribute(name);
-    if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-    const shared = bakedMat(o.material);
-    if (shared) {
-      // the material's colour (times any colour already in the vertices)
-      const n = g.attributes.position.count, c = o.material.color, had = o.material.vertexColors && g.attributes.color;
-      const col = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        col[i * 3] = c.r * (had ? had.getX(i) : 1);
-        col[i * 3 + 1] = c.g * (had ? had.getY(i) : 1);
-        col[i * 3 + 2] = c.b * (had ? had.getZ(i) : 1);
-      }
-      g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    } else {
-      if (!o.material.vertexColors && g.attributes.color) g.deleteAttribute('color');
-      if (o.material.vertexColors && !g.attributes.color) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(1), 3));
-    }
-    const m = shared || o.material;
-    if (!byMat.has(m)) byMat.set(m, []);
-    byMat.get(m).push(g);
-  });
-  const out = into || new THREE.Group();
-  for (const c of [...out.children]) { c.geometry.dispose(); out.remove(c); }
-  for (const [m, list] of byMat) {
-    const merged = mergeGeometries(list);
-    for (const g of list) g.dispose();
-    if (!merged) continue;
-    const mesh = new THREE.Mesh(merged, m);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    out.add(mesh);
-  }
-  return out;
-}
-
 // ------------------------------------------------------------- animation --
 const ease = (cur, target, k) => cur + (target - cur) * k;
 
-// Poses: stand, walk (with speed), sit, knock, peep (lean to a peephole),
-// crouch, hidden, collapse, reach (arms out, for him), torch and wave (a
-// flashlight held up, for him), dead.
+// Poses: stand, walk (with speed), sit, collapse, aim and aim2 (one or two
+// hands), phone, talk, sleep, drive, hands (up), cower, jump, hold.
 export class Rig {
   constructor(p) {
     Object.assign(this, p);
@@ -939,28 +864,17 @@ export class Rig {
     this.lookYaw = 0;
     this.lookPitch = 0;
     this.glance = { t: 2, yaw: 0, pitch: 0 };
-    this.knockT = 0;
     this.talkT = 0;
-    this.state = { speed: 0, pose: 'stand', lookYaw: null, lookPitch: 0, possessed: false, tilt: 0 };
+    this.state = { speed: 0, pose: 'stand', lookYaw: null, lookPitch: 0, tilt: 0 };
     this.cur = {};
-    this.possessedShown = false;
   }
 
-  // ask for a knock, a punch or a line of speech; they play over whatever
-  // pose is on
-  knock() { this.knockT = 1.25; }
+  // ask for a punch or a line of speech; they play over whatever pose is on
   punch() { this.punchT = 0.32; }
   talk(sec = 1.5) { this.talkT = sec; }
 
-  setPossessed(on) {
-    if (on === this.possessedShown) return;
-    this.possessedShown = on;
-    const m = on ? eyeMat(0x0a0a0a, true) : this.eyeMat;
-    for (const e of this.eyes) e.material = m;
-  }
-
   // st: { speed (m/s), pose, lookYaw/lookPitch (radians, relative to the
-  // body; null = look around on their own), possessed, tilt }
+  // body; null = look around on their own), tilt }
   update(dt, st = this.state) {
     this.t += dt;
     const t = this.t;
@@ -968,7 +882,7 @@ export class Rig {
     const legsWalk = pose === 'walk' || pose === 'stand' || pose === 'aim' || pose === 'aim2';
     const sp = legsWalk ? st.speed || 0 : 0;
     const moving = sp > 0.12;
-    const still = st.possessed || st.stiff;
+    const still = st.stiff;
     if (moving) this.phase += dt * (1.6 + sp * 2.1) * (st.stride || 1);
     const ph = this.phase;
     const amp = moving ? Math.min(0.62, 0.2 + sp * 0.18) : 0;
@@ -1009,38 +923,10 @@ export class Rig {
       set('hipLZ', -0.06); set('hipRZ', 0.06);
       set('spineX', -0.06); set('shLX', -0.32); set('shRX', -0.3); set('elL', -0.85); set('elR', -0.8);
       set('shLZ', 0.04); set('shRZ', -0.04);
-    } else if (pose === 'crouch') {
-      set('pelvisY', 0.55); set('hipLX', -1.6); set('hipRX', -1.2); set('kneeL', 2.2); set('kneeR', 1.9);
-      set('ankleL', -0.6); set('ankleR', -0.5); set('spineX', 0.5); set('neckX', -0.4);
-      set('shLX', -0.7); set('shRX', -0.7); set('elL', -1.2); set('elR', -1.2);
-    } else if (pose === 'peep') {
-      // leaning in to an eye at the door
-      set('spineX', 0.16); set('chestX', 0.06); set('neckX', -0.1);
-      set('shRX', -1.1); set('shRZ', 0.25); set('elR', -1.3);
-      set('shLX', -0.5); set('elL', -1.1);
-      set('kneeL', 0.1); set('kneeR', 0.04); set('hipLX', -0.15);
     } else if (pose === 'collapse') {
       set('pelvisY', 0.2); set('bodyRX', -1.45); set('hipLX', -0.3); set('kneeL', 0.4); set('kneeR', 0.2);
       set('shLX', -2.6); set('shRX', -2.2); set('elL', -0.3); set('elR', -0.6); set('neckX', -0.3);
       set('bodyY', 0.12);
-    } else if (pose === 'reach') {
-      set('shLX', -1.35); set('shRX', -1.45); set('shLZ', -0.05); set('shRZ', 0.05); set('elL', -0.25); set('elR', -0.15);
-      set('spineX', 0.22); set('neckX', -0.25);
-      if (moving) {
-        set('hipLX', -s * amp); set('hipRX', s * amp);
-        set('kneeL', Math.max(0, c) * amp * 1.6 + 0.1); set('kneeR', Math.max(0, -c) * amp * 1.6 + 0.1);
-        set('pelvisY', 0.94 + Math.abs(c) * amp * 0.03);
-      }
-    } else if (pose === 'pockets') {
-      // hands in coat pockets
-      set('shLX', 0.12); set('shRX', 0.12); set('shLZ', -0.22); set('shRZ', 0.22); set('elL', -0.55); set('elR', -0.55);
-      set('shLY', 0.3); set('shRY', -0.3);
-    } else if (pose === 'torch' || pose === 'wave') {
-      // a flashlight held out in the left hand, up at the tower; waving, the
-      // right arm up over his head, slowly, side to side
-      set('shLX', -2.05); set('shLZ', -0.12); set('elL', -0.08); set('wrL', 0.15);
-      set('neckX', -0.3); set('spineX', -0.05);
-      if (pose === 'wave') { set('shRX', -2.8); set('shRZ', 0.32 + Math.sin(t * 2.2) * 0.3); set('elR', -0.4); }
     } else if (pose === 'aim' || pose === 'aim2') {
       // a gun held out in front, pointed where they look (legs walk as usual)
       if (moving) {
@@ -1089,15 +975,6 @@ export class Rig {
         set('kneeL', Math.max(0, c) * amp * 1.55 + 0.06); set('kneeR', Math.max(0, -c) * amp * 1.55 + 0.06);
         set('pelvisY', 0.95 - 0.012 + Math.abs(c) * amp * 0.035);
       }
-    }
-    // knocking: right forearm raps the door at chest height
-    if (this.knockT > 0) {
-      this.knockT -= dt;
-      const k = Math.min(1, this.knockT * 6, (1.25 - this.knockT) * 6);
-      const rap = Math.max(0, Math.sin((1.25 - this.knockT) * Math.PI * 2 * 2.4));
-      set('shRX', ease(T.shRX, -1.25, k)); set('shRZ', ease(T.shRZ, 0.2, k));
-      set('elR', ease(T.elR, -1.35 + rap * 0.45, k));
-      set('wrR', ease(0, 0.3, k));
     }
     // a punch: the right arm jabs out and back
     if (this.punchT > 0) {
@@ -1166,16 +1043,16 @@ export class Rig {
     if (this.pony) this.pony.rotation.x = 0.35 + Math.sin(ph) * amp * 0.15;
     if (this.skirt) {
       // over the lap when sitting or crouched; swings a little when walking
-      const fold = pose === 'sit' || pose === 'crouch' || pose === 'collapse';
+      const fold = pose === 'sit' || pose === 'collapse';
       this.skirt.scale.y = ease(this.skirt.scale.y, fold ? 0.32 : 1, 1 - Math.exp(-dt * 10));
       this.skirt.scale.z = ease(this.skirt.scale.z, fold ? 1.6 : 1, 1 - Math.exp(-dt * 10));
       this.skirt.position.z = ease(this.skirt.position.z, fold ? 0.08 : 0, 1 - Math.exp(-dt * 10));
       this.skirt.rotation.x = fold ? 0 : Math.sin(ph) * amp * 0.06;
     }
 
-    // blinking (people who aren't themselves don't)
+    // blinking
     this.blinkT -= dt;
-    if (this.blinkT <= 0 && !st.possessed && !st.noBlink) {
+    if (this.blinkT <= 0 && !st.noBlink) {
       this.blinkT = 2 + Math.random() * 4;
       this.blink = 0.16;
     }
@@ -1185,8 +1062,7 @@ export class Rig {
       lid = LID_OPEN + (LID_SHUT - LID_OPEN) * Math.sin(Math.max(0, this.blink / 0.16) * Math.PI);
     }
     if (pose === 'collapse' || pose === 'sleep' || st.eyesClosed) lid = LID_SHUT;
-    if (st.possessed || st.noBlink) lid = LID_OPEN - 0.2;  // wide open
+    if (st.noBlink) lid = LID_OPEN - 0.2;  // wide open
     for (const l of this.lids) l.rotation.x = lid - this.lookPitch * 0.3;
-    this.setPossessed(!!st.possessed);
   }
 }

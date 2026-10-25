@@ -208,7 +208,7 @@ export function makeMarker(kind, r = 1.4) {
 // pickups: a spinning thing over a soft glow
 const PICK = {
   cash: [0x40c060, 'box', [0.35, 0.2, 0.2]], health: [0xe02020, 'cross'], armor: [0x3a7ae0, 'box', [0.35, 0.45, 0.12]],
-  pistol: [0x9a9a9a, 'gun', 1], smg: [0x9a9a9a, 'gun', 2], shotgun: [0x9a9a9a, 'gun', 3], tape: [0x202020, 'box', [0.19, 0.03, 0.1]],
+  pistol: [0x9a9a9a, 'gun', 1], smg: [0x9a9a9a, 'gun', 2], shotgun: [0x9a9a9a, 'gun', 3], package: [0x8a6a3a, 'box', [0.42, 0.3, 0.32]],
   bag: [0x6a4a2a, 'box', [0.45, 0.3, 0.25]], crate: [0x8a6a3a, 'box', [0.9, 0.9, 1.4]],
 };
 export function makePickup(kind, gunModel) {
@@ -223,13 +223,10 @@ export function makePickup(kind, gunModel) {
     obj = gunModel(dims);
     obj.scale.setScalar(2.2);
   } else obj = new THREE.Mesh(new THREE.BoxGeometry(...dims), m);
-  if (kind === 'tape') {
-    obj = new THREE.Group();
-    obj.add(new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.105, 0.025), m));
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.05), new THREE.MeshBasicMaterial({ map: TX.sign('SECURITY\nTAPE', { w: 128, h: 48, bg: '#e8e0c8', fg: '#2a2a6a', font: 'bold 18px Arial' }) }));
-    label.position.z = 0.014;
-    obj.add(label);
-    obj.scale.setScalar(2.2);
+  if (kind === 'package') {
+    // a brown box, taped up
+    const tape = new THREE.MeshStandardMaterial({ color: 0xd8c890, roughness: 0.5 });
+    obj.add(new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.31, 0.06), tape), new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.31, 0.33), tape));
   }
   obj.position.y = kind === 'crate' ? 0.6 : 1.0;
   g.add(obj);

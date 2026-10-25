@@ -1,4 +1,4 @@
-// Kingsgate's street lights. There are hundreds of lamps, far too many for
+// San Cielo's street lights. There are hundreds of lamps, far too many for
 // ordinary three.js lights, so they live on a grid of 12 m squares laid
 // over the whole island (at most one lamp to a square, anywhere inside it):
 // the client's shader looks at the nine squares round each pixel, and a

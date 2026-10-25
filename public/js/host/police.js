@@ -1,4 +1,4 @@
-// The Kingsgate Police Department. Each player has their own wanted level:
+// The San Cielo Police Department. Each player has their own wanted level:
 // crimes add heat, heat makes stars, stars bring police cars (sirens, on
 // the road network until they're close, then straight at you) and officers
 // on foot. From two stars they shoot. Get out of every cop's sight long

@@ -11,7 +11,7 @@ import { PLACES, PARKING, EDGES, WALK_NODES, lane, openAt, areaName, edgesNear, 
 import { INTERIOR, interiorAt, worldSolids } from '../shared/interiors.js';
 import { rayCar, rayPerson, rayBox, circleVsCar, carVsCar } from '../shared/collide.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS, PAINT, TAXI_PAINT, carVel } from '../shared/car.js';
-import { TAPES, TAPE_PAY, TAPES_BONUS, BARKS, SHOP } from '../shared/story.js';
+import { PACKAGES, PACKAGE_PAY, PACKAGES_BONUS, PICKUPS, BARKS, SHOP } from '../shared/story.js';
 import { Driver } from './drivers.js';
 import { Crowd, makePed, PED_LOOKS, LOOK_COP, A, r2 } from './peds.js';
 import { Police } from './police.js';
@@ -28,7 +28,7 @@ function homeSpots() {
 const ANIM_RUN = 2;
 
 export class Match {
-  constructor({ seed = 'kingsgate', roster, send, start = 0, save = null }) {
+  constructor({ seed = 'san-cielo', roster, send, start = 0, save = null }) {
     this.seed = seed;
     this.rng = makeRng(seed);
     this.send = send;
@@ -43,7 +43,7 @@ export class Match {
     this.nextCar = 1;
     this.nextPickup = 1;
     this.spots = PARKING.map(() => ({ car: null, cool: 0 }));
-    this.tapes = new Set(save?.tapes || []);
+    this.packages = new Set(save?.packages || []);
     this.introT = start === 'skip' ? INTRO_LEN : 0;
     this.players = roster.map((r, i) => this.makePlayer(r, i));
     if (save && this.players[0]) {
@@ -232,7 +232,7 @@ export class Match {
       if (p.dead) continue;
       if (p.inCar === c.id) { p.inCar = null; this.killPed(p, by); continue; }
       const d = Math.hypot(p.x - c.x, p.z - c.z);
-      if (d < 7 && p.kind !== 'mq') { p.vx = (p.x - c.x) / (d + 0.5) * 8; p.vz = (p.z - c.z) / (d + 0.5) * 8; this.hurtPed(p, 100 * (1 - d / 7), by, { knock: true }); }
+      if (d < 7) { p.vx = (p.x - c.x) / (d + 0.5) * 8; p.vz = (p.z - c.z) / (d + 0.5) * 8; this.hurtPed(p, 100 * (1 - d / 7), by, { knock: true }); }
     }
     for (const o of this.cars.values()) {
       if (o === c || o.dead) continue;
@@ -251,7 +251,6 @@ export class Match {
 
   hurtPed(p, dmg, by, { knock = false, dir = null } = {}) {
     if (p.dead) return;
-    if (p.kind === 'mq') return;     // plastic doesn't bleed
     p.hp -= dmg;
     if (dir) { p.vx = dir[0] * 3; p.vz = dir[1] * 3; }
     if (p.hp <= 0) { this.killPed(p, by); return; }
@@ -279,7 +278,7 @@ export class Match {
       if (p.kind === 'civ') this.police.crime(by, 0.75, 1);
       else if (p.kind === 'cop') this.police.crime(by, 1, 2);
     }
-    if (p.cash > 0 && p.kind !== 'mq') this.addPickup('cash', p.x + 0.4, p.z, { amount: p.cash, life: 40 });
+    if (p.cash > 0 && !p.friend) this.addPickup('cash', p.x + 0.4, p.z, { amount: p.cash, life: 40 });
     if (p.kind === 'cop' && this.rng() < 0.5) this.addPickup('pistol', p.x - 0.4, p.z, { amount: 12, life: 40 });
     this.crowd.scare(p.x, p.z, 30, { cower: true });
   }
@@ -331,17 +330,13 @@ export class Match {
 
   // ------------------------------------------------------------ pickups
   placePickups() {
-    // weapons and health lying about the city, and the lost tapes
-    const fixed = [
-      ['health', PLACES.hospital.x + 3, PLACES.hospital.z], ['armor', PLACES.police.x + 4, PLACES.police.z],
-      ['pistol', -150, 152], ['shotgun', 15, 231], ['smg', 158, -128], ['health', 0.5, -3.5], ['armor', -88, 84],
-    ];
-    for (const [kind, x, z] of fixed) this.addPickup(kind, x, z, { respawn: 60, amount: kind === 'pistol' ? 24 : kind === 'smg' ? 60 : kind === 'shotgun' ? 12 : 0 });
-    TAPES.forEach(([x, z], i) => { if (!this.tapes.has(i)) this.addPickup('tape', x, z, { tape: i }); });
+    // weapons and health lying about the city, and the hidden packages
+    for (const [kind, x, z] of PICKUPS) this.addPickup(kind, x, z, { respawn: 60, amount: kind === 'pistol' ? 24 : kind === 'smg' ? 60 : kind === 'shotgun' ? 12 : 0 });
+    PACKAGES.forEach(([x, z], i) => { if (!this.packages.has(i)) this.addPickup('package', x, z, { pkg: i }); });
   }
 
   addPickup(kind, x, z, o = {}) {
-    const p = { id: this.nextPickup++, kind, x, z, amount: o.amount || 0, respawn: o.respawn || 0, until: o.life ? this.t + o.life : null, mission: !!o.mission, tape: o.tape ?? null, gone: false, backAt: 0 };
+    const p = { id: this.nextPickup++, kind, x, z, amount: o.amount || 0, respawn: o.respawn || 0, until: o.life ? this.t + o.life : null, mission: !!o.mission, pkg: o.pkg ?? null, gone: false, backAt: 0 };
     this.pickups.set(p.id, p);
     return p;
   }
@@ -352,12 +347,12 @@ export class Match {
       case 'health': if (p.hp >= MAX_HP) return false; p.hp = MAX_HP; break;
       case 'armor': if (p.armor >= MAX_ARMOR) return false; p.armor = MAX_ARMOR; break;
       case 'pistol': case 'smg': case 'shotgun': this.giveWeapon(p, pk.kind, pk.amount || WEAPONS[WEAPON_INDEX[pk.kind]].ammo / 2); break;
-      case 'tape': {
-        this.tapes.add(pk.tape);
-        this.addMoney(p, TAPE_PAY);
-        const all = this.tapes.size >= TAPES.length;
-        this.emit({ t: 'banner', text: all ? 'ALL 13 TAPES FOUND' : `SECURITY TAPE ${this.tapes.size} OF ${TAPES.length}`, sub: all ? `$${TAPES_BONUS}` : `$${TAPE_PAY}`, kind: 'tape' });
-        if (all) for (const q of this.players) this.addMoney(q, TAPES_BONUS);
+      case 'package': {
+        this.packages.add(pk.pkg);
+        this.addMoney(p, PACKAGE_PAY);
+        const all = this.packages.size >= PACKAGES.length;
+        this.emit({ t: 'banner', text: all ? `ALL ${PACKAGES.length} PACKAGES FOUND` : `HIDDEN PACKAGE ${this.packages.size} OF ${PACKAGES.length}`, sub: all ? `$${PACKAGES_BONUS}` : `$${PACKAGE_PAY}`, kind: 'package' });
+        if (all) for (const q of this.players) this.addMoney(q, PACKAGES_BONUS);
         this.save();
         break;
       }
@@ -637,7 +632,7 @@ export class Match {
   save() {
     const host = this.players[0];
     if (!host) return;
-    this.emit({ t: 'save', data: { done: this.missions.done, money: host.money, ammo: host.ammo.map((a) => (a === Infinity ? 0 : a)), tapes: [...this.tapes] } }, host.id);
+    this.emit({ t: 'save', data: { done: this.missions.done, money: host.money, ammo: host.ammo.map((a) => (a === Infinity ? 0 : a)), packages: [...this.packages] } }, host.id);
   }
 
   // ------------------------------------------------------------ the tick
@@ -726,7 +721,7 @@ export class Match {
       const driver = this.players.find((p) => p.car === c.id && p.seat === 0) || null;
       const [vx, vz] = carVel(c);
       for (const p of this.peds.values()) {
-        if (p.dead || p.inCar != null || p.kind === 'mq') continue;
+        if (p.dead || p.inCar != null) continue;
         if (Math.abs(p.x - c.x) > 4 || Math.abs(p.z - c.z) > 4) continue;
         if (!circleVsCar(p.x, p.z, PED.r + 0.1, c)) continue;
         if (p.hitBy === c.id && this.t - p.hitT < 1) continue;

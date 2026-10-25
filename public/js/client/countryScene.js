@@ -349,13 +349,14 @@ export class Country {
     const T = new Merger();
     const box = (x, y, z, w, h, d, col, ry = 0) => T.add(BOXG, col, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(w, h, d)));
     const cyl = (x, y, z, r0, r1, h, col) => T.add(new THREE.CylinderGeometry(r1, r0, h, 8), col, new THREE.Matrix4().makeTranslation(x, y + h / 2, z));
-    // KINGSGATE, on the hill above town, facing it
+    // SAN CIELO, on the hill above town, facing it
     const text = SIGN.text;
     const step = SIGN.letter * 0.78 + SIGN.gap;
     const x0 = SIGN.x - (text.length - 1) * step / 2;
     const signMat = (ch) => new THREE.MeshStandardMaterial({ map: TX.letter(ch), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 });
     this.signMats = [];
     [...text].forEach((ch, k) => {
+      if (ch === ' ') return;
       const x = x0 + k * step, z = SIGN.z + Math.sin(k * 0.7) * 0.8;
       const y = heightAt(x, z) + 0.4;
       const m = signMat(ch);
@@ -393,17 +394,26 @@ export class Country {
       this.scene.add(r);
       this.spin.push(r);
     }
-    // the pier: a deck on piles, rails along each side
+    // the pier: a deck on piles, rails along each side, and at the land end
+    // a ramp down to the sand
     const P = COUNTRY.pier;
     const wood = [0.45, 0.33, 0.22], dark = [0.3, 0.22, 0.15];
-    box((P.x0 + P.x1) / 2, P.y - 0.2, (P.z0 + P.z1) / 2, P.x1 - P.x0, 0.4, P.z1 - P.z0, wood);
-    for (let x = P.x0 + 2; x < P.x1 - 1; x += 7) {
+    const xr = P.x1 - P.ramp, zc = (P.z0 + P.z1) / 2;
+    box((P.x0 + xr) / 2, P.y - 0.2, zc, xr - P.x0, 0.4, P.z1 - P.z0, wood);
+    const drop = P.y - P.land, slope = Math.atan2(drop, P.ramp), long = Math.hypot(P.ramp, drop);
+    const sloped = (y, w, h, d, z, col) => T.add(BOXG, col, new THREE.Matrix4().compose(new THREE.Vector3(xr + P.ramp / 2, (P.y + P.land) / 2 + y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -slope), new THREE.Vector3(long + w, h, d)));
+    sloped(-0.2, 0.3, 0.4, P.z1 - P.z0, zc, wood);
+    for (let x = P.x0 + 2; x < xr; x += 7) {
       for (const z of [P.z0 + 0.6, P.z1 - 0.6]) {
         box(x, (P.y - 0.4 + SEA_Y - 6) / 2, z, 0.45, P.y - 0.4 - SEA_Y + 6, 0.45, dark);
         box(x, P.y + 0.55, z, 0.15, 1.1, 0.15, dark);
       }
     }
-    for (const z of [P.z0 + 0.6, P.z1 - 0.6]) box((P.x0 + P.x1) / 2, P.y + 1.05, z, P.x1 - P.x0 - 2, 0.12, 0.12, dark);
+    for (const z of [P.z0 + 0.6, P.z1 - 0.6]) {
+      box((P.x0 + xr) / 2 + 1, P.y + 1.05, z, xr - P.x0 - 2, 0.12, 0.12, dark);
+      sloped(1.05, 0, 0.12, 0.12, z, dark);
+      box(P.x1 - 0.3, P.land + 0.55, z, 0.15, 1.1, 0.15, dark);
+    }
     // lifeguard huts on the beach
     for (const p of COUNTRY.props.filter((q) => q.t === 'lifeguard')) {
       for (const [dx, dz] of [[-0.9, -0.9], [0.9, -0.9], [0.9, 0.9], [-0.9, 0.9]]) box(p.x + dx, p.y + 1, p.z + dz, 0.15, 2.2, 0.15, [0.85, 0.85, 0.82]);

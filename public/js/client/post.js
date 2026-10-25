@@ -2,9 +2,9 @@
 // cheap two-level bloom makes signs and fixtures glow; then one pass
 // tone-maps (ACES), sharpens (contrast-adaptive, harder when the picture
 // is being drawn below full resolution), adds a vignette (and, if you like,
-// the grain, wobble, smear and scanlines of an old camcorder tape),
-// letterboxes cutscenes, fades, and, on the security monitors, turns the
-// picture into a grey-green, rolling, noisy 1996 camera feed.
+// the grain, wobble, smear and scanlines of an old camcorder tape), closes
+// in a little when the police are after you, letterboxes cutscenes and
+// fades.
 
 import * as THREE from 'three';
 
@@ -40,7 +40,7 @@ const blurFrag = /* glsl */`
 const finalFrag = /* glsl */`
   uniform sampler2D tex, bloomA, bloomB;
   uniform vec2 res;
-  uniform float aspect, time, exposure, bloom, grain, vignette, bars, fade, fear, staticAmt, glitch, binoc, vhs, saturation, sharpen, cctv;
+  uniform float aspect, time, exposure, bloom, grain, vignette, bars, fade, heat, vhs, saturation, sharpen;
   uniform vec3 fadeColor;
   varying vec2 vUv;
 
@@ -59,16 +59,7 @@ const finalFrag = /* glsl */`
   void main() {
     vec2 uv = vUv;
     vec2 c = (uv - 0.5) * vec2(aspect, 1.0);   // screen-height units
-    float mask = 1.0;
-    float ca = fear * 0.003;
-
-    // tape tearing when something is very wrong
-    if (glitch > 0.0) {
-      float line = floor(uv.y * 240.0);
-      uv.x += (h(vec2(line, floor(time * 24.0))) - 0.5) * glitch * 0.03;
-      float row = floor(uv.y * 12.0);
-      uv.x += step(1.0 - glitch * 0.4, h(vec2(row, floor(time * 18.0)))) * (h(vec2(row, time)) - 0.5) * 0.16 * glitch;
-    }
+    float ca = heat * 0.003;
 
     // the tape: each line wobbles a little, and a tracking band rolls by
     if (vhs > 0.0) {
@@ -79,19 +70,10 @@ const finalFrag = /* glsl */`
       uv.x += band * 0.004 * vhs * h(vec2(floor(vUv.y * 300.0), time));
       ca += 0.0007 * vhs;
     }
-    uv = 0.5 + (uv - 0.5) * (1.0 + fear * 0.02 * dot(c, c) - cctv * 0.06 * dot(c, c));
-    if (cctv > 0.5) uv.x += (h(vec2(floor(vUv.y * 180.0), floor(time * 30.0))) - 0.5) * 0.002;
+    uv = 0.5 + (uv - 0.5) * (1.0 + heat * 0.02 * dot(c, c));
 
     vec3 glow = (texture2D(bloomA, uv).rgb * 0.7 + texture2D(bloomB, uv).rgb * 0.9) * bloom;
     float k = exposure;
-    if (binoc > 0.5) {
-      // two round lenses, a little overlapped
-      float r = 0.43;
-      float dl = length(c - vec2(-0.21, 0.0)), dr = length(c - vec2(0.21, 0.0));
-      float d = min(dl, dr);
-      mask = 1.0 - smoothstep(r - 0.02, r, d);
-      k *= 1.0 - 0.35 * smoothstep(r * 0.55, r, d);
-    }
     vec3 col = aces((grab(uv, ca) + glow) * k);
     if (sharpen > 0.0) {
       // contrast-adaptive sharpening on the tone-mapped picture: crisp
@@ -109,14 +91,6 @@ const finalFrag = /* glsl */`
     }
     float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(vec3(l), col, saturation * (1.0 - 0.18 * vhs));
-    if (cctv > 0.5) {
-      // a 1996 security camera: grey-green, soft, noisy, a bar rolling up the screen
-      float m = pow(clamp(l * 1.15, 0.0, 1.0), 0.85);
-      col = vec3(m * 0.8, m * 0.98, m * 0.78);
-      col *= 0.9 + 0.1 * sin(vUv.y * res.y * 0.9);
-      col *= 1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.06, abs(fract(vUv.y * 0.6 - time * 0.07) - 0.5)));
-      col += (h(vUv * res * 0.5 + floor(time * 30.0)) - 0.5) * 0.08;
-    }
     if (vhs > 0.0) {
       col = col * (1.0 - 0.05 * vhs) + vec3(0.016, 0.013, 0.02) * vhs;
       col *= 1.0 - 0.07 * vhs * step(0.5, fract(vUv.y * res.y * 0.5));
@@ -125,13 +99,7 @@ const finalFrag = /* glsl */`
     // grain and vignette
     col += (h(vUv * res + fract(time) * 100.0) - 0.5) * grain;
     float vig = smoothstep(1.05, 0.25, length(c * vec2(0.9, 1.1)));
-    col *= mix(1.0, vig, vignette + fear * 0.35);
-
-    col *= mask;
-
-    // static
-    float s = h(vUv * res * 0.5 + floor(time * 30.0));
-    col = mix(col, vec3(s * 0.85), clamp(staticAmt, 0.0, 1.0));
+    col *= mix(1.0, vig, vignette + heat * 0.35);
 
     col = mix(col, fadeColor, clamp(fade, 0.0, 1.0));
     float bar = bars * 0.115;
@@ -160,8 +128,8 @@ export class Post {
       tex: { value: this.target.texture }, bloomA: { value: this.a1.texture }, bloomB: { value: this.b1.texture },
       res: { value: new THREE.Vector2(4, 4) }, aspect: { value: 1 }, time: { value: 0 },
       exposure: { value: 1 }, bloom: { value: 0.8 }, grain: { value: 0.025 }, vignette: { value: 0.5 },
-      bars: { value: 0 }, fade: { value: 0 }, fadeColor: { value: new THREE.Color(0, 0, 0) }, cctv: { value: 0 },
-      fear: { value: 0 }, staticAmt: { value: 0 }, glitch: { value: 0 }, binoc: { value: 0 }, vhs: { value: 0 }, saturation: { value: 1 }, sharpen: { value: 0.5 },
+      bars: { value: 0 }, fade: { value: 0 }, fadeColor: { value: new THREE.Color(0, 0, 0) },
+      heat: { value: 0 }, vhs: { value: 0 }, saturation: { value: 1 }, sharpen: { value: 0.5 },
     };
     this.final = mk(finalFrag, this.u);
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.final);
@@ -229,15 +197,11 @@ export class Post {
     u.exposure.value = fx.exposure ?? 1;
     u.bars.value = fx.bars || 0;
     u.fade.value = fx.fade || 0;
-    u.fear.value = fx.fear || 0;
-    u.staticAmt.value = fx.staticAmt || 0;
-    u.glitch.value = fx.glitch || 0;
-    u.binoc.value = fx.binoc ? 1 : 0;
-    u.cctv.value = fx.cctv ? 1 : 0;
+    u.heat.value = fx.heat || 0;
     u.vhs.value = this.grainOn ? 1 : 0;
     u.saturation.value = fx.saturation ?? 1;
     u.grain.value = this.grainOn ? 0.022 + (fx.noise || 0) : (fx.noise || 0);
-    u.vignette.value = fx.cctv ? 0.9 : this.grainOn ? 0.45 : 0.25;
+    u.vignette.value = this.grainOn ? 0.45 : 0.25;
     if (fx.fadeColor != null) u.fadeColor.value.set(fx.fadeColor);
     this.quad.material = this.final;
     r.setRenderTarget(null);

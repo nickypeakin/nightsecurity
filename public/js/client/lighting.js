@@ -1,4 +1,4 @@
-// Kingsgate's street lights, in the shader. There are hundreds of lamps,
+// San Cielo's street lights, in the shader. There are hundreds of lamps,
 // far too many for three.js lights, so every standard material is patched
 // (once, globally) to light itself from the lamps in the nine grid squares
 // around each pixel: their colours, heights and exact spots live in two

@@ -2,23 +2,27 @@
 // Checks the streets come alive (traffic that drives on the roads and
 // keeps moving, people on the pavements), that crimes bring the police and
 // the police can bust you, that you can be wasted and come back, that
-// shooting, carjacking, running people over, burning cars, pickups, the
-// gun shop, Spray-N-Go, saving and co-op all work, and plays every job
-// from the first to the credits.
+// shooting, carjacking, running people over, burning cars, pickups and
+// hidden packages, the gun shop, Spray-N-Go, saving and co-op all work, and
+// plays every job from the first to the credits.
 //
 // usage: node test/sim.test.js
 
 import { Match, INTRO_LEN } from '../public/js/host/match.js';
 import { TICK, WEAPONS, PRICES, MAX_HP } from '../public/js/shared/config.js';
-import { PLACES, NODES, onRoad, openAt, inWater, groundY } from '../public/js/shared/city.js';
+import { PLACES, NODES, WALK_NODES, XS, ZS, onRoad, openAt, inWater, groundY, areaName } from '../public/js/shared/city.js';
 import { ROUTE, along } from '../public/js/shared/world.js';
 import { Driver } from '../public/js/host/drivers.js';
 import { INTERIOR, interiorAt } from '../public/js/shared/interiors.js';
-import { MISSIONS, TAPES, TAPE_PAY } from '../public/js/shared/story.js';
+import { MISSIONS, PACKAGES, PACKAGE_PAY } from '../public/js/shared/story.js';
 
 let failures = 0;
 const check = (ok, what) => { if (!ok) { failures++; console.log('  FAIL:', what); } };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+// the street corner nearest (x, z), to stand on
+const corner = (x, z) => WALK_NODES.reduce((b, n) => (Math.hypot(n.x - x, n.z - z) < Math.hypot(b.x - x, b.z - z) ? n : b));
+const HOME = INTERIOR.home.door;
+const areaOf = (c) => areaName(c.x, c.z);
 
 function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) {
   const log = [];
@@ -89,11 +93,12 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.step(0.2);
   H.enter(0, c);
   check(p.car === c.id && p.wanted === 0, 'get in your own car, no questions asked');
-  H.driveTo(0, -150, 120);
+  H.driveTo(0, XS[4], ZS[6] + 2.6, Math.PI / 2);
   H.step(0.5);
   H.exit(0);
-  H.go(0, 150, -150);
-  H.go(1, 150, -152);
+  const far = corner(XS[10], ZS[1]);
+  H.go(0, far.x, far.z);
+  H.go(1, far.x, far.z + 2);
   H.step(5);
   check(m.cars.has(c.id), "and it's still where you left it");
   // wreck it: a new one turns up at home
@@ -111,7 +116,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   console.log('the city comes alive');
   const H = setup(2, 'streets');
   const { m } = H;
-  H.go(1, 0, -32.5);
+  const at = corner(XS[6], ZS[3]);
+  H.go(1, at.x, at.z);
   let maxTick = 0;
   const moved = new Map();
   let offRoad = 0, samples = 0, blocked = 0, pedSamples = 0;
@@ -237,7 +243,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   const H = setup(1, 'police');
   const { m, P } = H;
   const p = P(0);
-  H.go(0, 0, -32.5);
+  const spot = corner(XS[6], ZS[3]);
+  H.go(0, spot.x, spot.z);
   H.step(5);
   // shoot somebody in the street
   m.giveWeapon(p, 'pistol', 48);
@@ -283,7 +290,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   const H = setup(1, 'getaway');
   const { m, P } = H;
   const p = P(0);
-  H.go(0, -40 + 7.5, -40 + 20);
+  const at = corner(XS[5], ZS[5]);
+  H.go(0, at.x, at.z);
   H.step(3);
   m.police.crime(p, 0, 1);
   check(p.wanted === 1, 'one star');
@@ -291,7 +299,8 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   for (let k = 0; k < 40 / TICK && !p.found && p.state === 'alive'; k++) { H.st(0); m.step(TICK); }
   check(p.found, 'the police find you');
   // then get clean away (as if you'd driven off fast), out of sight
-  H.go(0, 200 - 7.5, 160);
+  const away = corner(XS[11], ZS[7]);
+  H.go(0, away.x, away.z);
   let lost = null;
   for (let k = 0; k < 60 / TICK && lost == null && p.state === 'alive'; k++) {
     H.st(0, { v: 0 });
@@ -311,8 +320,9 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   const H = setup(2, 'cars', { immortal: false });
   const { m, P } = H;
   const p = P(0);
-  H.go(0, 120 - 7.5, 0);
-  H.go(1, 120 - 7.5, 3);
+  const at = corner(XS[8], ZS[5]);
+  H.go(0, at.x, at.z);
+  H.go(1, at.x, at.z + 3);
   H.step(20);
   // jack a car out of traffic
   const victim = [...m.cars.values()].filter((c) => c.ai && c.ai.mode === 'cruise' && c.driverLook != null && !c.police).sort((a, b) => dist(a, p) - dist(b, p))[0];
@@ -348,14 +358,17 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   check(p.car == null && P(1).car == null, 'F gets you out');
   check(victim.ai && victim.ai.mode === 'park', 'and the car stays put');
   // set a car on fire: it burns, then goes up and takes you with it
-  const parked = [...m.cars.values()].filter((c) => c.parkedSpot != null).sort((a, b) => dist(a, P(1)) - dist(b, P(1)))[0] || victim;
-  const front = { x: parked.x + Math.sin(parked.h) * 6, z: parked.z + Math.cos(parked.h) * 6 };
+  // (somewhere to shoot it from: open, and in sight of it)
+  const standOff = (c) => [[0, 6], [0, -6], [6, 0], [-6, 0], [4, 4], [-4, 4], [4, -4], [-4, -4]].map(([dx, dz]) => ({ x: c.x + dx, z: c.z + dz }))
+    .find((q) => m.openAt(q.x, q.z, 0.4) && m.solids.clear(q.x, 1.45, q.z, c.x, 0.8, c.z));
+  const parked = [...m.cars.values()].filter((c) => c.parkedSpot != null && standOff(c)).sort((a, b) => dist(a, P(1)) - dist(b, P(1)))[0] || victim;
+  const front = standOff(parked);
   H.go(1, front.x, front.z);
   m.giveWeapon(P(1), 'smg', 240);
   let shots = 0;
   while (parked.hp > 0 && shots < 200) { H.go(1, front.x, front.z); H.shoot(1, parked.x, 0.8, parked.z, 2); H.step(0.12); shots++; }
   check(parked.fire, `a shot-up car catches fire (${shots} shots)`);
-  H.go(1, parked.x + Math.sin(parked.h) * 3.5, parked.z + Math.cos(parked.h) * 3.5);
+  H.go(1, (front.x + parked.x) / 2, (front.z + parked.z) / 2);
   const hp = P(1).hp;
   H.step(5);
   check(parked.dead, 'and explodes');
@@ -373,14 +386,17 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   const H = setup(1, 'shop');
   const { m, P } = H;
   const p = P(0);
-  // a tape
-  const tape = [...m.pickups.values()].find((k) => k.kind === 'tape');
+  // a hidden package
+  const pkgs = [...m.pickups.values()].filter((k) => k.kind === 'package');
+  check(pkgs.length === PACKAGES.length, `${pkgs.length} hidden packages out there`);
+  const pkg = pkgs[0];
   const before = p.money;
-  H.go(0, tape.x, tape.z);
+  H.go(0, pkg.x, pkg.z);
   H.step(0.3);
-  check(!m.pickups.has(tape.id), 'walk into a tape to take it');
-  check(p.money === before + TAPE_PAY, 'tapes pay');
-  check(H.msgs('save').length >= 1 && H.msgs('save').pop().data.tapes.includes(tape.tape), 'and save the game');
+  check(!m.pickups.has(pkg.id), 'walk into a package to take it');
+  check(p.money === before + PACKAGE_PAY, 'packages pay');
+  check(H.banners().includes(`HIDDEN PACKAGE 1 OF ${PACKAGES.length}`), 'and count');
+  check(H.msgs('save').length >= 1 && H.msgs('save').pop().data.packages.includes(pkg.pkg), 'and save the game');
   // health
   p.hp = 30;
   const hk = [...m.pickups.values()].find((k) => k.kind === 'health');
@@ -388,7 +404,7 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.step(0.3);
   check(p.hp === MAX_HP, 'health pickups heal');
   check(hk.gone, 'and come back later');
-  // the gun shop (inside Kingsgate Arms)
+  // the gun shop (inside Freedom Arms)
   const G = INTERIOR.guns.spots.shop;
   H.go(0, G.x, G.z);
   p.money = 1000;
@@ -407,7 +423,7 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   p.hp = 40; p.money = 100;
   m.handle(p.id, { t: 'buy', item: 'meal' });
   check(p.hp === MAX_HP && p.money === 100 - PRICES.meal, "a meal at Sal's puts you right");
-  H.go(0, 0, 0);
+  H.go(0, corner(0, 0).x, corner(0, 0).z);
   p.money = 5000;
   m.handle(p.id, { t: 'buy', item: 'smg' });
   check(p.ammo[2] === -1, 'only at the counter');
@@ -429,12 +445,12 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
 // ------------------------------------------------------ saving and continuing
 {
   console.log('continuing a saved game');
-  const H = setup(1, 'saved', { save: { done: 3, money: 999, ammo: [0, 30, -1, -1], tapes: [0, 1, 2] } });
+  const H = setup(1, 'saved', { save: { done: 3, money: 999, ammo: [0, 30, -1, -1], packages: [0, 1, 2] } });
   const { m, P } = H;
   check(m.missions.done === 3, 'jobs done are remembered');
   check(m.missions.next.id === 'm4', 'the next job is offered');
   check(P(0).money === 999 && P(0).ammo[1] === 30 && P(0).ammo[2] === -1, 'money and guns are remembered');
-  check([...m.pickups.values()].filter((k) => k.kind === 'tape').length === TAPES.length - 3, 'tapes found stay found');
+  check([...m.pickups.values()].filter((k) => k.kind === 'package').length === PACKAGES.length - 3, 'packages found stay found');
   // walking up to your bed saves
   H.go(0, INTERIOR.home.spots.save.x, INTERIOR.home.spots.save.z);
   H.clear();
@@ -495,22 +511,59 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   const drain = (sec) => H.step(sec);
   let money;
 
-  // 1. Night Work: fetch a car
+  // whoever's in `group` (Dre) gets in the car player 0 is driving
+  const ride = (group) => {
+    const c = m.cars.get(p.car), q = m.peds.get(A().groups[group][0]);
+    H.driveTo(0, q.x + 1.5, q.z);
+    for (let k = 0; k < 30 && q.inCar !== c.id; k++) H.step(0.1);
+    return q.inCar === c.id;
+  };
+  // your own car (or, if it's been wrecked, a new one beside you)
+  const myCar = () => { const c = m.cars.get(p.ownCar); return c && !c.dead ? c : m.spawnCar('sedan', p.x + 3, p.z, 0); };
+  const shootDown = (group, w) => {
+    const list = A().groups[group].map((id) => m.peds.get(id));
+    for (let k = 0; k < 600 && stepIs('kill'); k++) {
+      const g = list.find((q) => q && !q.dead);
+      if (!g) break;
+      H.go(0, g.x + 3, g.z);
+      H.shoot(0, g.x, 1.2, g.z, w);
+      p.ammo[w] = Math.max(p.ammo[w], 20);
+      H.step(0.3);
+    }
+    return list;
+  };
+
+  // 1. Easy Money: Dre comes along to fetch a car
   money = p.money;
   startNext();
-  check(stepIs('enter'), 'job 1: get in the car');
-  check(mBlip().some((b) => b.k === 'car'), 'the car is on the radar');
+  untilStep('board', 4);
+  check(stepIs('board'), 'job 1: Dre waits outside');
+  check(mBlip().some((b) => b.k === 'friend'), 'Dre is on the radar');
+  const dre = m.peds.get(A().groups.dre[0]);
+  check(dist(dre, HOME) < 6, 'by your front door');
+  H.enter(0, myCar());
+  check(ride('dre'), 'Dre gets in your car');
+  untilStep('goto', 3);
+  check(stepIs('goto'), 'job 1: drive to the beach');
+  const beach = A().def.steps[A().idx].at;
+  H.driveTo(0, beach.x - 10, beach.z);
+  H.step(0.5);
+  untilStep('enter', 3);
+  check(stepIs('enter') && dre.inCar == null, 'Dre gets out at the beach');
+  H.exit(0);
   H.enter(0, car('repo'));
   H.step(0.3);
-  check(stepIs('deliver'), 'job 1: deliver it');
-  H.driveTo(0, 152, 64);
+  check(stepIs('board'), 'take the Kestrel and wait for Dre');
+  check(ride('dre'), 'Dre gets in the Kestrel');
+  untilStep('deliver', 3);
+  H.driveTo(0, PLACES.lot.x, PLACES.lot.z);
   H.step(0.5);
   talk();
   drain(0.3);
-  passed('Night Work');
+  passed('Easy Money');
   check(p.money === money + MISSIONS[0].pay && P(1).money >= MISSIONS[0].pay, 'everyone is paid');
 
-  // 2. Repo Man: steal a car with an alarm, get it resprayed
+  // 2. Alarm Bells: a car with an alarm, then a respray
   startNext();
   H.enter(0, car('kestrel'));
   H.step(0.3);
@@ -523,51 +576,51 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   check(p.wanted === 0, 'Spray-N-Go loses the police');
   check(p.money === money - PRICES.respray, 'for a price');
   untilStep('deliver', 4);
-  H.driveTo(0, 152, 64);
+  H.driveTo(0, PLACES.lot.x, PLACES.lot.z);
   H.step(0.5);
   talk();
   drain(0.3);
-  passed('Repo Man');
+  passed('Alarm Bells');
 
-  // 3. Collections: a gunfight, then the money
+  // 3. Bad Company: Dre's debt, a gunfight at the Pool Hall, the money
   startNext();
-  untilStep('goto', 6);
-  check(p.ammo[1] >= 48, 'Voss gives you a pistol');
+  untilStep('board', 6);
+  check(p.ammo[1] >= 48, 'Dre gives you a pistol');
+  H.enter(0, myCar());
+  check(ride('dre'), 'Dre rides with you');
+  untilStep('goto', 2);
   const pool = A().def.steps[A().idx].at;
-  H.go(0, pool.x, pool.z + 4);
-  H.go(1, pool.x + 2, pool.z + 4);
+  H.driveTo(0, pool.x, pool.z);
+  H.step(0.5);
   untilStep('kill', 5);
-  const gang = A().groups.brill.map((id) => m.peds.get(id));
-  check(gang.length === 4, "Brill's crew");
-  check(mBlip().filter((b) => b.k === 'enemy').length === 4, 'on the radar');
-  for (let k = 0; k < 400 && stepIs('kill'); k++) {
-    const g = gang.find((q) => q && !q.dead);
-    if (!g) break;
-    H.go(0, g.x + 3, g.z);
-    H.shoot(0, g.x, 1.2, g.z, 1);
-    H.step(0.3);
-    p.ammo[1] = Math.max(p.ammo[1], 20);
-  }
-  check(gang.every((q) => q.dead), 'they all go down');
+  check(stepIs('kill'), "Brill's waiting");
+  H.exit(0);
+  check(mBlip().filter((b) => b.k === 'enemy').length === 5, "Brill's crew on the radar");
+  const gang = shootDown('brill', 1);
+  check(gang.length === 5 && gang.every((q) => q.dead), 'they all go down');
   untilStep('pickup', 3);
   const bag = m.pickups.get(A().pickups.bag);
-  check(!!bag, 'the boss drops the money');
+  check(!!bag, 'Brill drops the money');
   H.go(1, bag.x, bag.z);
   H.step(0.5);
-  check(stepIs('goto'), 'a friend can pick it up');
+  check(stepIs('board'), 'a friend can pick it up');
+  H.enter(0, myCar());
+  check(ride('dre'), 'Dre gets back in');
+  untilStep('goto', 2);
   cool();
-  H.go(0, PLACES.voss.x, PLACES.voss.z);
+  H.driveTo(0, HOME.x, HOME.z + 4);
   H.step(0.5);
   talk();
   drain(0.3);
-  passed('Collections');
+  passed('Bad Company');
 
-  // 4. Wheelman: the getaway
+  // 4. The Driver: the getaway
   startNext();
   H.enter(0, car('getaway'));
   H.step(0.3);
-  check(stepIs('goto'), 'job 4: drive to the store');
-  H.driveTo(0, 124.9, -80, Math.PI);
+  check(stepIs('goto'), 'job 4: drive to the Diamond Exchange');
+  const store = A().def.steps[A().idx].at;
+  H.driveTo(0, store.x, store.z);
   H.step(0.5);
   untilStep('board', 6);
   check(stepIs('board'), 'the crew comes out');
@@ -579,10 +632,10 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.step(0.5);
   talk();
   drain(0.5);
-  passed('Wheelman');
+  passed('The Driver');
   check(crew.every((q) => !q || q.inCar == null), 'the crew gets out');
 
-  // 5. Checkpoint: the race
+  // 5. Street Kings: the race
   startNext();
   H.enter(0, car('racer'));
   H.step(0.3);
@@ -598,54 +651,77 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   untilStep('say', 2);
   talk();
   drain(0.3);
-  passed('Checkpoint');
+  passed('Street Kings');
 
-  // 6. Convoy: burn two vans
+  // 6. Hot Cargo: a truck from the airport
   startNext();
-  untilStep('destroy', 6);
-  check(p.ammo[2] >= 120, 'an SMG');
-  const vans = ['van1', 'van2'].map(car);
-  H.step(3);
-  check(vans.every((v) => Math.hypot(v.x - A().def.steps[2].at[vans.indexOf(v)].x, v.z - A().def.steps[2].at[vans.indexOf(v)].z) > 3), 'the vans drive');
-  for (let k = 0; k < 600 && stepIs('destroy'); k++) {
-    const v = vans.find((q) => !q.dead && !q.fire) || vans.find((q) => !q.dead);
-    if (!v) break;
-    H.go(0, v.x + 6, v.z + 6);
-    H.shoot(0, v.x, 0.8, v.z, 2);
-    p.ammo[2] = Math.max(p.ammo[2], 60);
-    H.step(0.12);
-  }
-  check(vans.every((v) => v.dead), 'both vans burn');
+  const cargo = car('cargo');
+  check(cargo && areaOf(cargo) === 'San Cielo International', 'job 6: the truck is out at the airport');
+  H.enter(0, cargo);
+  H.step(0.3);
+  untilStep('lose', 6);
+  check(p.wanted >= 3, 'airport security calls the police');
   cool();
+  untilStep('deliver', 3);
+  H.driveTo(0, PLACES.voss.x, PLACES.voss.z);
   H.step(0.5);
   talk();
   drain(0.3);
-  passed('Convoy');
+  passed('Hot Cargo');
 
-  // 7. Thirteen
+  // 7. The Score: the armoured truck
   startNext();
-  check(stepIs('goto'), 'job 7: the pier');
-  H.go(0, PLACES.pier.x, PLACES.pier.z);
-  untilStep('pickup', 3);
-  const mq = A().groups.mq.map((id) => m.peds.get(id));
-  check(mq.length === 9 && mq.every((q) => q && m.openAt(q.x, q.z, 0.2)), 'nine of them among the containers');
-  const crate = m.pickups.get(A().pickups.crate);
-  H.go(0, crate.x, crate.z);
+  untilStep('destroy', 8);
+  check(p.ammo[2] >= 120, 'an SMG');
+  const truck = car('truck');
+  check(truck && truck.hp >= 300, 'an armoured truck');
+  const t0 = { x: truck.x, z: truck.z };
+  H.step(3);
+  check(dist(truck, t0) > 3, 'it drives');
+  for (let k = 0; k < 900 && stepIs('destroy'); k++) {
+    H.go(0, truck.x + 6, truck.z + 6);
+    H.shoot(0, truck.x, 0.8, truck.z, 2);
+    p.ammo[2] = Math.max(p.ammo[2], 60);
+    H.step(0.12);
+  }
+  check(truck.dead, 'and is stopped');
+  untilStep('loot', 2);
+  const loot = A().s.ids.map((id) => m.pickups.get(id));
+  check(loot.length === 4 && loot.every((b) => b && m.openAt(b.x, b.z, 0.3)), 'four bags of cash spill out');
+  check(mBlip().filter((b) => b.k === 'pickup').length === 4, 'on the radar');
+  loot.forEach((b, k) => { H.go(k % 2, b.x, b.z); H.step(0.3); });
+  untilStep('lose', 6);
+  check(p.wanted >= 4, 'four stars');
+  cool();
+  untilStep('goto', 3);
+  H.go(0, PLACES.vince.x, PLACES.vince.z);
   H.step(0.5);
-  check(p.carry === 'crate', 'you carry the crate');
-  H.go(0, PLACES.ruins.x, PLACES.ruins.z);
+  talk();
+  drain(0.3);
+  passed('The Score');
+
+  // 8. Paid in Full: Voss, the docks, and Dre
+  startNext();
+  untilStep('goto', 6);
+  check(p.ammo[3] >= 40, 'a shotgun');
+  H.go(0, PLACES.terminal.x, PLACES.terminal.z);
+  H.go(1, PLACES.terminal.x + 2, PLACES.terminal.z);
+  untilStep('kill', 5);
+  const boss = A().groups.voss.map((id) => m.peds.get(id));
+  check(boss.length === 8 && boss.filter((q) => q.boss).length === 1, 'Voss and her crew');
+  shootDown('voss', 3);
+  check(boss.every((q) => q.dead), 'they all go down');
+  untilStep('board', 4);
+  check(stepIs('board'), 'Dre is there');
+  H.enter(0, myCar());
+  check(ride('dre'), 'Dre gets in');
+  untilStep('goto', 2);
+  cool();
+  H.driveTo(0, HOME.x, HOME.z + 4);
   H.step(0.5);
-  check(stepIs('target'), 'put it down at the old mall');
-  const box = m.objects.get(A().objects.crate);
-  check(!!box, 'the crate is there');
-  H.go(0, box.x + 4, box.z);
-  for (let k = 0; k < 60 && stepIs('target'); k++) { H.shoot(0, box.x, 0.6, box.z, 1); p.ammo[1] = Math.max(p.ammo[1], 20); H.step(0.35); }
-  check(!m.objects.has(box.id), 'and smash it');
-  H.step(0.3);
-  check(mq.every((q) => q.dead), 'they all fall');
   talk();
   drain(0.5);
-  passed('Thirteen');
+  passed('Paid in Full');
   check(m.missions.done === MISSIONS.length, 'every job done');
   check(credits === 1, 'the credits roll');
   check(!m.missions.marker(), 'no more jobs');
@@ -660,10 +736,11 @@ function setup(n, seed, { start = 'skip', save = null, immortal = false } = {}) 
   H.go(0, mk.x, mk.z);
   H.step(0.5);
   for (let k = 0; k < 40 && m.missions.active?.def.steps[m.missions.active.idx]?.do === 'say'; k++) { m.handle('p1', { t: 'skip' }); H.step(0.2); }
-  const c = m.cars.get(m.missions.active.cars.repo);
-  m.hurtCar(c, 999, P(0));
+  for (let k = 0; k < 40 && !m.missions.active.groups.dre; k++) H.step(0.1);
+  m.killPed(m.peds.get(m.missions.active.groups.dre[0]), null);
   H.step(6);
-  check(!m.missions.active && H.banners().includes('MISSION FAILED'), 'wreck the car, fail the job');
+  check(!m.missions.active && H.banners().includes('MISSION FAILED'), 'lose Dre, fail the job');
+  check(H.msgs('banner').some((b) => b.text === 'MISSION FAILED' && /Dre/.test(b.sub)), 'and you are told why');
   check(m.missions.done === 0, 'and do it again');
   H.go(0, mk.x + 20, mk.z);
   H.step(8);

@@ -392,7 +392,7 @@ class Sound {
     if (kind === 'cash') play([84, 88, 91], 'triangle', 0.05, 0.08);
     if (kind === 'checkpoint') play([79, 84], 'square', 0.07, 0.06);
     if (kind === 'wanted') play([67, 0, 67], 'square', 0.08, 0.05);
-    if (kind === 'tape') play([72, 76, 79, 84], 'triangle', 0.1, 0.1);
+    if (kind === 'package') play([72, 76, 79, 84], 'triangle', 0.1, 0.1);
     if (kind === 'count') play([72], 'square', 0.2, 0.08);
     if (kind === 'go') play([84], 'square', 0.4, 0.1);
   }

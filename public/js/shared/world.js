@@ -1,10 +1,11 @@
-// The island Kingsgate stands on: the shape of the coast, the lie of the
+// The island San Cielo stands on: the shape of the coast, the lie of the
 // land and the highways out of town. Shared by the host and every client, so
 // everybody builds the same island from the same numbers.
 //
 // The city sits flat on the south coast with its harbour (its streets and
-// blocks come from city.js). West of it is Pelican Beach and its pier; to
-// the north the Kingsgate Hills (with the sign), then the flat Redwater
+// blocks come from plan.js and city.js), Pelican Beach's sand and pier along
+// its west side and the airport out on a peninsula to the south-west. To the
+// north are the Starlight Hills (with the sign), then the flat Redwater
 // Desert and Lake Corrigan, Dust Creek on the lake's south-east shore, Mount
 // Calder in the east and Mount Harlow in the north-west, with the pine
 // forests round it and Port Kerry at the island's northern tip. The Coast
@@ -18,8 +19,9 @@
 //
 // x runs east, z runs south (north is -z), as in city.js.
 
+import { inTown, TOWN, GROUND, XS, ZS } from './plan.js';
+
 export const SEA_Y = -1.1;                // the sea's surface
-export const CITY_BOX = { x0: -209, x1: 209, z0: -209, z1: 236 };   // the city's own ground
 // the rooms you can walk into are out at sea, off the south-east coast,
 // where nobody outside will ever see them (see interiors.js)
 export const ROOMS_BOX = { x0: 957, x1: 985, z0: 294, z1: 428 };
@@ -28,7 +30,7 @@ export const ROAD_W = 6;                  // highway asphalt half-width
 const FLAT = 14, BANK = 30;               // flat either side of a road, then the bank
 
 // the height grid
-export const GRID = { x0: -1000, z0: -2800, cell: 5, nx: 385, nz: 647 };
+export const GRID = { x0: -1000, z0: -2800, cell: 5, nx: 385, nz: 665 };
 const { x0: GX, z0: GZ, cell: GC, nx: NX, nz: NZ } = GRID;
 export const HEIGHT = new Float32Array(NX * NZ);
 const ROAD_D = new Float32Array(NX * NZ).fill(1e9);   // how far to the nearest road
@@ -68,13 +70,13 @@ const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + (b - a) / (2
 // ------------------------------------------------------------ the coast --
 // round the island clockwise from the harbour's east end (x, z)
 export const COAST = [
-  [215, 237], [-215, 237], [-245, 300], [-335, 348], [-520, 362], [-700, 335], [-792, 255], [-772, 172], [-652, 150],
-  [-482, 162], [-405, 172], [-372, 138], [-362, 60], [-372, -60], [-402, -170], [-470, -262],
-  [-522, -385], [-565, -560], [-640, -700], [-700, -850], [-655, -975], [-725, -1080], [-822, -1150],
+  [520, 237], [-269, 237], [-300, 262], [-420, 334], [-600, 424], [-800, 444], [-948, 384], [-966, 282], [-918, 202],
+  [-762, 182], [-642, 162], [-604, 82], [-598, -60], [-602, -200], [-615, -330], [-640, -462], [-672, -582],
+  [-700, -702], [-700, -850], [-655, -975], [-725, -1080], [-822, -1150],
   [-862, -1350], [-902, -1600], [-882, -1850], [-822, -2050], [-762, -2250], [-642, -2420], [-462, -2560],
   [-252, -2682], [-62, -2722], [122, -2662], [262, -2562], [372, -2600], [452, -2470], [562, -2202], [682, -1952],
-  [782, -1652], [712, -1500], [842, -1352], [862, -1052], [822, -802], [800, -600], [770, -420], [730, -240],
-  [700, -60], [660, 80], [580, 180], [440, 238], [300, 252],
+  [782, -1652], [712, -1500], [842, -1352], [862, -1052], [822, -802], [810, -600], [792, -420], [762, -240],
+  [722, -60], [692, 90], [642, 190], [562, 240],
 ];
 
 // signed distance to the coast (+ on land), exact (for the coarse grid)
@@ -103,10 +105,25 @@ function coastAt(x, z) {
   return lerp(lerp(a, b, u), lerp(c, d, u), v);
 }
 
-// how far (x, z) is from the city's ground (0 inside it)
+// how far (x, z) is from the city's ground (0 on it): exact near town (a
+// 10 m grid of it, read smoothly), the distance to its bounding box further
+// out
+const rectDist = (r, x, z) => Math.hypot(Math.max(r.x0 - x, 0, x - r.x1), Math.max(r.z0 - z, 0, z - r.z1));
+const CD = { x0: TOWN.x0 - 400, z0: TOWN.z0 - 400, cell: 10 };
+CD.nx = Math.ceil((TOWN.x1 + 400 - CD.x0) / CD.cell) + 1;
+CD.nz = Math.ceil((TOWN.z1 + 400 - CD.z0) / CD.cell) + 1;
+CD.d = new Float32Array(CD.nx * CD.nz);
+for (let j = 0; j < CD.nz; j++) for (let i = 0; i < CD.nx; i++) {
+  const x = CD.x0 + i * CD.cell, z = CD.z0 + j * CD.cell;
+  let d = Infinity;
+  for (const r of GROUND) d = Math.min(d, rectDist(r, x, z));
+  CD.d[j * CD.nx + i] = d;
+}
 export function cityDist(x, z) {
-  const dx = Math.max(CITY_BOX.x0 - x, 0, x - CITY_BOX.x1), dz = Math.max(CITY_BOX.z0 - z, 0, z - CITY_BOX.z1);
-  return Math.hypot(dx, dz);
+  const fx = (x - CD.x0) / CD.cell, fz = (z - CD.z0) / CD.cell;
+  if (fx < 0 || fz < 0 || fx >= CD.nx - 1 || fz >= CD.nz - 1) return rectDist(TOWN, x, z) + 200;
+  const i = fx | 0, j = fz | 0, u = fx - i, v = fz - j, k = j * CD.nx + i, D = CD.d;
+  return lerp(lerp(D[k], D[k + 1], u), lerp(D[k + CD.nx], D[k + CD.nx + 1], u), v);
 }
 
 // distance to the coast (+ on land), with the wiggles the coast really has
@@ -132,10 +149,10 @@ export const PEAKS = [
   [-110, -2260, 260, 110, 1.4],
   [-610, -1760, 280, 120, 1.5],
   [-560, -1160, 230, 75, 1.4],
-  [-560, -560, 200, 60, 1.3],
-  [-280, -430, 200, 62, 1.3],       // Kingsgate Hills
-  [-20, -480, 180, 52, 1.3],
-  [250, -450, 170, 48, 1.3],
+  [-470, -640, 170, 55, 1.3],
+  [-260, -610, 220, 72, 1.3],       // the Starlight Hills
+  [-20, -650, 200, 62, 1.3],
+  [250, -630, 190, 55, 1.3],
   [640, -1180, 280, 170, 1.5],      // Mount Calder
   [570, -1720, 220, 90, 1.4],
   [690, -720, 190, 70, 1.4],
@@ -143,7 +160,7 @@ export const PEAKS = [
   [0, -1880, 250, 70, 1.3],
   [-300, -1480, 200, 55, 1.3],
   [310, -1840, 200, 60, 1.3],
-  [540, -150, 220, 65, 1.3],        // the hills east of town
+  [630, -130, 150, 55, 1.3],        // the hills east of town
 ];
 function mountains(x, z) {
   let h = 0;
@@ -207,27 +224,27 @@ export function heightAt(x, z) {
 // one out in the country) through control points, smoothed into a curve.
 // ends: [x, z] exactly at a city junction, or a named junction below.
 export const JUNCTIONS = {
-  coastW: [-585, -760], desertW: [-150, -980], east: [300, -900], dust: [338, -1130], port: [0, -2572], beach: [-312, 62],
+  coastW: [-585, -760], desertW: [-150, -980], east: [300, -900], dust: [338, -1130], port: [0, -2572], air: [-500, 252],
 };
 const J = JUNCTIONS;
 export const ROUTE_DEFS = [
-  // the Coast Highway: out to Pelican Beach and up the west coast
-  { id: 'coastS0', name: 'Coast Highway', pts: [[-200, 120], [-232, 120], [-282, 108], J.beach] },
-  { id: 'coastS', name: 'Coast Highway', pts: [J.beach, [-322, -30], [-345, -140], [-395, -245], [-445, -390], [-485, -560], [-545, -690], J.coastW] },
-  // out to the airport, and round to the beach
-  { id: 'airport', name: 'Airport Road', pts: [[-200, 200], [-232, 200], [-292, 214], [-342, 204], [-338, 150], [-326, 100], J.beach] },
+  // the Coast Highway: north from Pelican Beach, up the west coast
+  { id: 'coastS', name: 'Coast Highway', pts: [[XS[0], ZS[1]], [XS[0], ZS[1] - 32], [-530, -420], [-575, -540], [-585, -660], J.coastW] },
+  // out to the airport, and back round into town
+  { id: 'airportW', name: 'Airport Road', pts: [[XS[0], ZS[7]], [XS[0] - 32, ZS[7]], [-578, 150], [-596, 205], [-560, 244], J.air] },
+  { id: 'airportE', name: 'Airport Road', pts: [[XS[2], ZS[8]], [XS[2], ZS[8] + 32], [-372, 252], [-440, 254], J.air] },
   { id: 'coastN', name: 'Coast Highway', pts: [J.coastW, [-578, -880], [-562, -1000], [-640, -1130], [-742, -1252], [-792, -1452], [-800, -1680], [-760, -1900], [-682, -2140], [-560, -2350], [-392, -2492], [-182, -2572], J.port] },
-  // the Hill Road, up through the Kingsgate Hills from Northside
-  { id: 'hill', name: 'Hill Road', pts: [[-120, -200], [-120, -232], [-128, -300], [-160, -380], [-118, -470], [-150, -560], [-128, -660], [-168, -770], [-152, -880], J.desertW] },
-  // the Eastern Freeway, from Eastgate to Port Kerry
-  { id: 'eastS', name: 'Eastern Freeway', pts: [[120, -200], [120, -232], [128, -300], [165, -400], [222, -545], [272, -722], J.east] },
+  // the Hill Road, up through the Starlight Hills from Starlight
+  { id: 'hill', name: 'Hill Road', pts: [[XS[5], ZS[0]], [XS[5], ZS[0] - 32], [-128, -480], [-160, -560], [-118, -650], [-150, -740], [-128, -840], J.desertW] },
+  // the Eastern Freeway, from Mirror Hills to Port Kerry
+  { id: 'eastS', name: 'Eastern Freeway', pts: [[XS[10], ZS[0]], [XS[10], ZS[0] - 32], [250, -480], [270, -580], [285, -730], J.east] },
   { id: 'eastM', name: 'Eastern Freeway', pts: [J.east, [322, -1012], J.dust] },
   { id: 'eastN', name: 'Eastern Freeway', pts: [J.dust, [400, -1300], [472, -1500], [492, -1722], [452, -1962], [362, -2200], [232, -2400], [112, -2530], J.port] },
   // the Desert Road, across the middle
   { id: 'desertW', name: 'Desert Road', pts: [J.coastW, [-490, -820], [-382, -880], [-262, -940], J.desertW] },
   { id: 'desertE', name: 'Desert Road', pts: [J.desertW, [-22, -1030], [120, -1078], [240, -1110], J.dust] },
   // the Shore Road, up the east coast from Eastgate
-  { id: 'shore', name: 'Shore Road', pts: [[200, 40], [232, 40], [280, 30], [325, -5], [372, -112], [420, -262], [466, -420], [442, -600], [382, -762], J.east] },
+  { id: 'shore', name: 'Shore Road', pts: [[XS[13], ZS[2]], [XS[13] + 32, ZS[2]], [565, -245], [620, -320], [650, -430], [620, -560], [540, -700], [420, -800], J.east] },
 ];
 
 // a Catmull-Rom curve through the points, every `step` metres or so
@@ -253,7 +270,7 @@ function curve(pts, step) {
   return out;
 }
 
-const isCity = ([x, z]) => cityDist(x, z) < 1;
+const isCity = ([x, z]) => inTown(x, z);
 // the height a junction out in the country sits at: the land round it
 const junctionY = {};
 for (const [k, [x, z]] of Object.entries(J)) {
@@ -378,51 +395,47 @@ const nearS = (routeId, x, z) => {
   return best;
 };
 
-// Pelican Beach: a pier, lifeguard huts, a café and beach houses along the
-// Coast Highway
+// Pelican Beach: the sand along the west of town, a pier with a café at the
+// end of it, lifeguard huts
 {
-  const z = 60;
-  C.pier = { x0: -455, x1: -322, z0: z - 6, z1: z + 6, y: 1.9 };
+  const z = -40;
+  C.pier = { x0: -690, x1: TOWN.x0 - 1, z0: z - 6, z1: z + 6, y: 1.2, ramp: 14 };
   C.props.push({ t: 'pierRail', x0: C.pier.x0, x1: C.pier.x1, z0: C.pier.z0, z1: C.pier.z1, y: C.pier.y, x: (C.pier.x0 + C.pier.x1) / 2, z });
-  C.buildings.push({ x0: -452, x1: -436, z0: z - 5, z1: z + 5, y: C.pier.y, h: 4.2, kind: 'shop', face: 'e', name: 'Pier Café', low: true, onPier: true });
-  for (const [x, zz] of [[-356, -60], [-360, 110], [-357, 0]]) C.props.push({ t: 'lifeguard', x, z: zz, h: -Math.PI / 2 });
-  for (let k = 0; k < 6; k++) beside('coastS', 40 + k * 46, 1, 14, 12, 10, 6.2, 'house', { roof: 'pitched', tint: k % 6 });
-  for (let k = 0; k < 4; k++) parkBeside('coastS', 62 + k * 46, 1, 10);
-  for (let k = 0; k < 10; k++) lampBeside('coastS', 20 + k * 38, k % 2 ? 1 : -1);
-  for (const id of ['coastS0', 'airport']) for (let k = 0; k < 4; k++) lampBeside(id, 24 + k * 36, k % 2 ? 1 : -1);
-  C.towns.push({ name: 'Pelican Beach', x: -330, z: 0, r: 180 });
+  C.buildings.push({ x0: -686, x1: -668, z0: z - 5, z1: z + 5, y: C.pier.y, h: 4.2, kind: 'shop', face: 'e', name: 'Pier Café', low: true, onPier: true });
+  for (const zz of [-250, -130, 40, 110]) C.props.push({ t: 'lifeguard', x: -568, z: zz, h: -Math.PI / 2 });
 }
 
-// Kingsgate International, out on the peninsula south-west of town: a
+// San Cielo International, out on the peninsula south-west of town: a
 // runway and a taxiway, the apron with a couple of airliners, the terminal
 // and its car park, the tower, two hangars
 C.strips = [];
 {
   const y = 3.2;
-  C.airport = { x0: -730, x1: -330, z0: 172, z1: 334, y };
+  C.airport = { x0: -920, x1: -460, z0: 215, z1: 400, y };
   C.pads.push({ ...C.airport, kind: 4, blend: 22 });
-  C.pads.push({ x0: -575, x1: -380, z0: 220, z1: 262, y, kind: 1 });
-  C.strips.push({ x0: -690, x1: -380, z0: 286, z1: 308, y, marks: true }, { x0: -660, x1: -400, z0: 258, z1: 268, y });
-  C.buildings.push({ x0: -440, x1: -380, z0: 180, z1: 214, y, h: 12, kind: 'glass', face: 'e', name: 'Kingsgate International' });
-  C.buildings.push({ x0: -462, x1: -452, z0: 226, z1: 236, y, h: 26, kind: 'glass', name: 'Tower' });
-  C.buildings.push({ x0: -560, x1: -524, z0: 186, z1: 216, y, h: 11, kind: 'warehouse', face: 's', name: 'Hangar 1' });
-  C.buildings.push({ x0: -620, x1: -584, z0: 186, z1: 216, y, h: 11, kind: 'warehouse', face: 's', name: 'Hangar 2' });
-  C.pads.push({ x0: -378, x1: -358, z0: 178, z1: 216, y, kind: 1 });
-  for (let k = 0; k < 5; k++) C.parking.push({ x: -368, z: 182 + k * 6.5, h: -Math.PI / 2, kind: 'lot' });
-  for (const [x, h] of [[-500, Math.PI / 2], [-430, Math.PI / 2]]) C.props.push({ t: 'plane', x, z: 244, y, h });
-  for (const [x, z] of [[-480, 240], [-410, 240], [-368, 196]]) { C.props.push({ t: 'lotLamp', x, z, y }); C.lamps.push({ x, z, y: y + 7, kind: 'white' }); }
+  C.pads.push({ x0: -760, x1: -560, z0: 262, z1: 300, y, kind: 1 });
+  C.strips.push({ x0: -900, x1: -580, z0: 330, z1: 352, y, marks: true }, { x0: -870, x1: -600, z0: 310, z1: 318, y });
+  C.buildings.push({ x0: -540, x1: -480, z0: 262, z1: 292, y, h: 12, kind: 'glass', face: 'n', name: 'San Cielo International' });
+  C.buildings.push({ x0: -582, x1: -572, z0: 268, z1: 278, y, h: 26, kind: 'glass', name: 'Tower' });
+  C.buildings.push({ x0: -680, x1: -644, z0: 222, z1: 252, y, h: 11, kind: 'warehouse', face: 's', name: 'Hangar 1' });
+  C.buildings.push({ x0: -740, x1: -704, z0: 222, z1: 252, y, h: 11, kind: 'warehouse', face: 's', name: 'Hangar 2' });
+  C.pads.push({ x0: -472, x1: -438, z0: 262, z1: 294, y, kind: 1 });
+  for (let k = 0; k < 5; k++) C.parking.push({ x: -455, z: 267 + k * 6.2, h: Math.PI / 2, kind: 'lot' });
+  for (const x of [-700, -630]) C.props.push({ t: 'plane', x, z: 282, y, h: Math.PI / 2 });
+  C.cargo = { x: -610, z: 256, h: -Math.PI / 2 };
+  for (const [x, z] of [[-665, 282], [-595, 282], [-455, 279]]) { C.props.push({ t: 'lotLamp', x, z, y }); C.lamps.push({ x, z, y: y + 7, kind: 'white' }); }
 }
 
 // up in the hills: three big houses on the Hill Road, and the sign
 {
-  for (const [s, side] of [[260, -1], [420, 1], [610, -1]]) {
+  for (const [s, side] of [[260, -1], [420, 1], [550, -1]]) {
     const { b } = beside('hill', s, side, 20, 22, 16, 7.5, 'house', { roof: 'flat', tint: 5, villa: true });
     C.props.push({ t: 'pool', x: (b.x0 + b.x1) / 2, z: side > 0 ? b.z1 + 7 : b.z0 - 7, y: b.y, w: 10, d: 5 });
     C.pads.push({ x0: b.x0 - 2, x1: b.x1 + 2, z0: b.z0 - 14, z1: b.z1 + 14, y: b.y - 0.07, kind: 1 });
   }
   for (let k = 0; k < 8; k++) lampBeside('hill', 30 + k * 40, k % 2 ? 1 : -1);
 }
-export const SIGN = { x: -262, z: -372, text: 'KINGSGATE', letter: 9, gap: 1.2 };
+export const SIGN = { x: -262, z: -500, text: 'SAN CIELO', letter: 9, gap: 1.2 };
 
 // Dust Creek: on the lake's south-east shore where the freeway meets the
 // Desert Road: a bar, a motel, a gas station, trailers, an airstrip
@@ -466,7 +479,7 @@ C.towns.push({ name: 'Redwater Airstrip', x: 70, z: -930, r: 170 });
 }
 
 // lamps along the highways where they leave town
-for (const id of ['eastS', 'shore']) for (let k = 0; k < 7; k++) lampBeside(id, 30 + k * 40, k % 2 ? 1 : -1);
+for (const id of ['eastS', 'shore', 'coastS', 'airportW', 'airportE']) for (let k = 0; k < 7 && 30 + k * 40 < ROUTE[id].len - 20; k++) lampBeside(id, 30 + k * 40, k % 2 ? 1 : -1);
 
 // the summit of Mount Harlow (the highest point near the peak), for the mast
 export const SUMMIT = (() => {
@@ -510,16 +523,14 @@ for (const P of C.pads) pad(P, P.blend || 8);
 }
 // the city's own ground hides the land under it
 {
-  const [i0, i1] = cellRange(CITY_BOX.x0, CITY_BOX.x1, GX, NX), [j0, j1] = cellRange(CITY_BOX.z0, CITY_BOX.z1, GZ, NZ);
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-    const x = GX + i * GC, z = GZ + j * GC;
-    if (x > CITY_BOX.x0 && x < CITY_BOX.x1 && z > CITY_BOX.z0 && z < CITY_BOX.z1) HEIGHT[j * NX + i] = -0.3;
-  }
+  const [i0, i1] = cellRange(TOWN.x0, TOWN.x1, GX, NX), [j0, j1] = cellRange(TOWN.z0, TOWN.z1, GZ, NZ);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (inTown(GX + i * GC, GZ + j * GC)) HEIGHT[j * NX + i] = -0.3;
 }
 // where the pier meets the sand
 {
   const P = C.pier;
-  P.y = Math.max(1.6, heightAt(P.x1 + 1, (P.z0 + P.z1) / 2) + 0.12);
+  P.land = Math.max(0.1, heightAt(P.x1 + 1, (P.z0 + P.z1) / 2));
+  P.y = Math.max(1.2, P.land + 0.12);
   for (const b of C.buildings) if (b.onPier) b.y = P.y;
   for (const p of C.props) if (p.t === 'pierRail') p.y = P.y;
 }
@@ -541,14 +552,14 @@ export function waterY(x, z) { return nearLake(x, z) && lakeQ(x, z) < 1.6 ? LAKE
 
 // -------------------------------------------------------------- places --
 const REGIONS = [
-  (x, z) => (x > -800 && x < -290 && z > 140 && z < 380 ? 'Kingsgate International' : null),
+  (x, z) => (x > -1000 && x < -440 && z > 165 && z < 470 ? 'San Cielo International' : null),
   (x, z) => C.towns.find((t) => Math.hypot(x - t.x, z - t.z) < t.r)?.name,
   (x, z) => (lakeQ(x, z) < 1.25 ? 'Lake Corrigan' : null),
   (x, z) => (Math.hypot(x - PEAKS[0][0], z - PEAKS[0][1]) < 430 ? 'Mount Harlow' : null),
   (x, z) => (Math.hypot(x - PEAKS[8][0], z - PEAKS[8][1]) < 300 ? 'Mount Calder' : null),
-  (x, z) => (x < -215 && z > -230 ? 'Pelican Beach' : null),
-  (x, z) => (z < -209 && z > -760 && x > -470 && x < 430 ? 'Kingsgate Hills' : null),
-  (x, z) => (x > 209 && z > -420 ? 'Eastgate Shore' : null),
+  (x, z) => (x < TOWN.x0 + 2 && z > -360 && z < 170 ? 'Pelican Beach' : null),
+  (x, z) => (z < TOWN.z0 + 2 && z > -900 && x > -470 && x < 430 ? 'Starlight Hills' : null),
+  (x, z) => (x > TOWN.x1 - 2 && z > -420 ? 'Eastgate Shore' : null),
   (x, z) => (desertness(x, z) > 0.4 ? 'Redwater Desert' : null),
   (x, z) => (z < -1650 ? 'Cedar Forest' : null),
   (x, z) => (x < -380 ? 'West Coast' : null),

@@ -9,10 +9,10 @@
 import * as THREE from 'three';
 import { PLAYER_R, WALK, JOG, SPRINT, JUMP_V, GRAVITY, REACH, WEAPONS, TICK, PRICES, hourAt, clockText } from '../shared/config.js';
 import { PLACES, groundY, areaName, inWater } from '../shared/city.js';
-import { INTERIOR, INTERIORS, interiorAt, worldSolids } from '../shared/interiors.js';
+import { INTERIOR, INTERIORS, GIVER_ROOMS, interiorAt, worldSolids } from '../shared/interiors.js';
 import { makeCar, stepCar, CAR_TYPES, CAR_KEYS } from '../shared/car.js';
 import { circleVsCar, rayCar, rayPerson } from '../shared/collide.js';
-import { PEOPLE, HELP, TITLE, DATE } from '../shared/story.js';
+import { PEOPLE, NAMES, HELP, PACKAGES } from '../shared/story.js';
 import { PersonView, PLAYER_LOOKS, GIVER_LOOKS, template, gunModel } from './people.js';
 import { CarView, prewarmCars } from './vehicles.js';
 import { Opening } from './opening.js';
@@ -20,7 +20,7 @@ import { Fx, makeMarker, makePickup } from './fx.js';
 import { Radar } from './radar.js';
 import { sound } from './audio.js';
 import { voice } from './voice.js';
-import { PED_LOOKS, LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2 } from '../host/peds.js';
+import { PED_LOOKS, LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS } from '../host/peds.js';
 
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
@@ -31,7 +31,6 @@ const DELAY = 0.15;              // how far behind the host's clock others are d
 
 // my animation codes (the host passes them on to everyone else)
 const AN = { idle: 0, walk: 1, run: 2, aim: 3, jump: 10 };
-const WHO = { okafor: 'Ray Okafor', voss: 'Lena Voss', dale: 'Dale Mercer', brill: 'Teddy Brill' };
 
 // a short history of where something was, to draw it a moment in the past
 class Track {
@@ -88,7 +87,7 @@ export class Game {
     this.p = { x: S.x - (this.myIdx % 2) * 1.1, z: S.z + Math.floor(this.myIdx / 2) * 1.1, y: 0, vy: 0, h: S.h, speed: 0, anim: 0, kx: 0, kz: 0, downT: 0 };
     this.room = null;           // the room you're in (null: outdoors)
     this.opening = new Opening(this);
-    this.tutorial = null;       // (after the opening: get to your car, then to Okafor)
+    this.tutorial = null;       // (after the opening: go and see Dre)
     this.doorArmed = true;      // (false just after a door, until you step off it)
     this.doorT = 0;
     this.camYaw = 0;
@@ -176,7 +175,7 @@ export class Game {
   // build every body and car once now, so nobody's first appearance stalls
   prewarm() {
     const g = new THREE.Group();
-    const looks = [...Array(PED_LOOKS).keys(), LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2];
+    const looks = [...Array(PED_LOOKS).keys(), LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS];
     for (const l of looks) template(l);
     for (const k of PLAYER_LOOKS) template(k, { lite: false });
     const v = new PersonView(g, 0);
@@ -292,13 +291,14 @@ export class Game {
     }
     for (const [k, m2] of this.markers) if (!want.has(k) && !k.startsWith('fixed:')) { m2.removeFromParent(); this.markers.delete(k); }
     for (const [k, [kind, x, z, r]] of want) if (!this.markers.has(k)) this.addMarker(k, x, z, kind, r, false);
-    // the people with jobs, always in their offices
+    // the people with jobs, always in their offices (Dre's on your sofa,
+    // unless he's out on a job)
     for (const key of Object.keys(PEOPLE)) {
-      const show = !!INTERIOR[key];
+      const show = !!INTERIOR[GIVER_ROOMS[key]];
       const v = this.givers.get(key);
       if (show && !v) {
         const g = new PersonView(this.world.scene, GIVER_LOOKS[key], { lite: false });
-        const at = INTERIOR[key].spots.giver;
+        const at = INTERIOR[GIVER_ROOMS[key]].spots.giver;
         g.set(at.x, at.z, at.h ?? 0, 0);
         this.givers.set(key, g);
       } else if (!show && v) { v.dispose(); this.givers.delete(key); }
@@ -315,7 +315,7 @@ export class Game {
   onSay(m) {
     const go = () => {
       const radio = m.radio;
-      const name = WHO[m.who] || m.who;
+      const name = NAMES[m.who] || m.who;
       if (!radio) { this.talking = m.who; this.talkUntil = performance.now() / 1000 + (m.dur || 4); this.cutLine = (this.cutLine || 0) + 1; }
       this.hud.say(name, m.text, radio ? 'radio' : 'talk', m.dur || 4);
       if (radio) sound.radio();
@@ -336,7 +336,7 @@ export class Game {
     this.hud.banner(m.text, m.sub, m.kind);
     if (m.kind === 'passed' || m.kind === 'failed' || m.kind === 'wasted' || m.kind === 'busted') sound.jingle(m.kind);
     if (m.kind === 'mission') sound.jingle('missionStart');
-    if (m.kind === 'tape') sound.jingle('tape');
+    if (m.kind === 'package') sound.jingle('package');
   }
 
   onFx(m) {
@@ -364,7 +364,6 @@ export class Game {
       case 'horn': { const C = this.cars.get(m.car); if (C && !(this.myCar && this.myCar.id === m.car)) sound.horn({ x: C.view.x, z: C.view.z }, 0.5); break; }
       case 'smash': F.puff(m.x, groundY(m.x, m.z) + 0.6, m.z, [0.45, 0.35, 0.2]); F.explosion(m.x, m.z); sound.crash({ x: m.x, z: m.z }, 0.8); break;
       case 'grab': if (m.id === me) { sound.crash(null, 0.3); this.shake = 1; } break;
-      case 'collapse': for (const P of this.peds.values()) if (P.look === LOOK_MQ || P.look === LOOK_MQ2) this.fx.puff(P.view.x, 1, P.view.z, [0.9, 0.88, 0.85]); break;
       case 'missionStart': case 'passed': case 'failed': break;
       case 'checkpoint': sound.jingle('checkpoint'); break;
       default:
@@ -418,25 +417,19 @@ export class Game {
     this.camYaw = this.p.h + Math.PI;
     this.camPitch = 0.22;
     this.cutFade = 1;
-    if (this.opening.t > 1 && !this.mission.active) this.tutorial = 'leave';
+    if (this.opening.t > 1 && !this.mission.active) this.tutorial = 'talk';
   }
 
-  // the first few minutes: out to your car, and over to Okafor's
+  // the first minute: go and see Dre, in the living room
   tutorialText() {
     const T = this.tutorial;
-    if (!T || this.mission.active) return null;
-    const me$ = this.me$;
-    if (T === 'leave' && this.myCar && this.myCar.id === me$.ownCar) this.tutorial = 'drive';
-    if (this.tutorial === 'drive') {
-      const D = INTERIOR.okafor.door, me = this.pos();
-      if (Math.hypot(me.x - D.x, me.z - D.z) < 14 || this.room === 'okafor') { this.tutorial = null; return null; }
-      return "Drive to ~y~Okafor's Motors~w~ on the Strip (~y~O~w~ on the radar).";
-    }
-    return this.room === 'home' ? 'Leave the house and get in your ~b~car~w~.' : 'Get in your ~b~car~w~ (the blue arrow on the radar).';
+    if (!T) return null;
+    if (this.mission.active) { this.tutorial = null; return null; }
+    return this.room === 'home' ? "~b~Dre~w~'s in the living room. Walk into the ring in front of him to start." : 'Go home: ~b~Dre~w~ is waiting (~g~D~w~ on the radar).';
   }
 
   credits() {
-    const lines = [['GTA 7', 'The End'], ['Thanks for playing', 'Kingsgate is still yours. Find all 13 tapes.']];
+    const lines = [['GTA 7', 'The End'], ['Thanks for playing', `San Cielo is still yours. Find all ${PACKAGES.length} hidden packages.`]];
     lines.forEach(([a, b], i) => setTimeout(() => this.hud.banner(a, b, 'credits'), 5000 + i * 4500));
   }
 
@@ -837,7 +830,10 @@ export class Game {
     }
     // job givers, and the people behind the counters, in their rooms
     const talking = this.talking && performance.now() / 1000 < this.talkUntil ? this.talking : null;
-    for (const [key, g] of this.givers) { g.root.visible = this.room === key; if (g.root.visible) g.update(dt, { y: groundY(g.x, g.z), pose: talking === key ? 'talk' : null }); }
+    for (const [key, g] of this.givers) {
+      g.root.visible = this.room === GIVER_ROOMS[key] && !(key === 'dre' && this.mission.active && !this.mission.cut);
+      if (g.root.visible) g.update(dt, { y: groundY(g.x, g.z), pose: talking === key ? 'talk' : null });
+    }
     for (const v of this.clerks) { v.root.visible = this.room === v.room; if (v.root.visible) v.update(dt, { y: groundY(v.x, v.z) }); }
     // indoors, the street outside isn't drawn
     if (this.room) {
@@ -914,7 +910,7 @@ export class Game {
     // a job's opening words, in the giver's office: a wide shot of the two
     // of you, then over the shoulder and close on whoever's talking, a cut
     // on every line
-    const giver = this.mission.cut && !this.myCar && !this.ride && this.room === this.mission.giver ? this.givers.get(this.mission.giver) : null;
+    const giver = this.mission.cut && !this.myCar && !this.ride && this.room === GIVER_ROOMS[this.mission.giver] ? this.givers.get(this.mission.giver) : null;
     if (giver) {
       const p = this.p;
       let dx = giver.x - p.x, dz = giver.z - p.z;
@@ -1151,13 +1147,13 @@ export class Game {
   }
 
   fxState() {
-    const f = this.fx$ || (this.fx$ = { fade: 0, bars: 0, exposure: 1, fear: 0, saturation: 1 });
+    const f = this.fx$ || (this.fx$ = { fade: 0, bars: 0, exposure: 1, heat: 0, saturation: 1 });
     f.time = this.T;
     const down = !this.alive();
     f.saturation += ((down ? 0.15 : 1) - f.saturation) * 0.05;
     f.bars += ((this.mission.cut || this.intro >= 0 ? 1 : 0) - f.bars) * 0.08;
     f.fade = Math.max(this.intro >= 0 ? this.opening.fade || 0 : 0, this.doorFade || 0, this.cutFade || 0);
-    f.fear = Math.min(0.6, (this.me$.wanted || 0) * 0.04);
+    f.heat = Math.min(0.6, (this.me$.wanted || 0) * 0.04);
     return f;
   }
 

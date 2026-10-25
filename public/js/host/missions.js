@@ -7,7 +7,7 @@ import { MISSIONS, PEOPLE } from '../shared/story.js';
 import { PLACES } from '../shared/city.js';
 import { INTERIOR, GIVER_ROOMS } from '../shared/interiors.js';
 import { WEAPON_INDEX, WEAPONS } from '../shared/config.js';
-import { makePed, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_MQ, LOOK_MQ2, A } from './peds.js';
+import { makePed, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS } from './peds.js';
 import { Driver } from './drivers.js';
 
 const MARKER_R = 2.2;
@@ -47,8 +47,9 @@ export class Missions {
       return;
     }
     const A0 = this.active;
-    // everyone down: that's the job gone
+    // everyone down: that's the job gone; so is a friend
     if (m.players.every((p) => p.state !== 'alive')) { this.fail('You were taken out.'); return; }
+    for (const g of A0.friends) if ((A0.groups[g] || []).every((id) => { const q = m.peds.get(id); return !q || q.dead; })) { this.fail(`${g === 'dre' ? 'Dre' : 'Your friend'} died.`); return; }
     const st = A0.def.steps[A0.idx];
     if (!st) { this.pass(); return; }
     if (!A0.begun) { A0.begun = true; A0.s = {}; this.begin(st); if (!this.active) return; this.changed(); }
@@ -59,7 +60,7 @@ export class Missions {
 
   start(def, by) {
     const m = this.m;
-    this.active = { def, idx: 0, begun: false, s: {}, cars: {}, groups: {}, pickups: {}, objects: {}, text: '', cut: false, timer: null };
+    this.active = { def, idx: 0, begun: false, s: {}, cars: {}, groups: {}, friends: new Set(), pickups: {}, objects: {}, text: '', cut: false, timer: null };
     m.emit({ t: 'banner', text: def.title, sub: PEOPLE[def.giver].name, kind: 'mission' });
     m.sound('missionStart');
     this.changed();
@@ -79,6 +80,8 @@ export class Missions {
         break;
       }
       case 'car': {
+        // (nothing else parked in the way)
+        for (const o of [...m.cars.values()]) if (!o.mission && Math.hypot(o.x - st.at.x, o.z - st.at.z) < 6 && !m.players.some((p) => p.car === o.id)) m.removeCar(o);
         const c = m.spawnCar(st.type, st.at.x, st.at.z, st.at.h, { paint: st.paint, keep: true, mission: true });
         c.ai = new Driver(m, c, 'park');
         A0.cars[st.id] = c.id;
@@ -101,10 +104,11 @@ export class Missions {
         for (let k = 0; k < st.n; k++) {
           const a = (k / st.n) * Math.PI * 2;
           const boss = st.boss && k === 0;
-          const look = st.kind === 'crew' ? LOOK_CREW : boss ? LOOK_BOSS : LOOK_GANG;
+          const look = st.look === 'dre' ? LOOK_DRE : boss && st.bossLook === 'voss' ? LOOK_VOSS : st.kind === 'crew' ? LOOK_CREW : boss ? LOOK_BOSS : LOOK_GANG;
           const p = makePed(st.kind === 'crew' ? 'crew' : 'gang', st.at.x + Math.cos(a) * (boss ? 0 : 2.5), st.at.z + Math.sin(a) * 1.2, look);
-          p.hp = boss ? 110 : 60;
-          p.w = WEAPON_INDEX[st.weapon] || 1;
+          p.hp = st.friend ? 400 : boss ? 110 : 60;
+          p.w = st.friend ? 0 : WEAPON_INDEX[st.weapon] || 1;
+          p.friend = !!st.friend;
           p.group = st.group;
           p.boss = boss;
           p.keep = true;
@@ -112,6 +116,7 @@ export class Missions {
           ids.push(p.id);
         }
         A0.groups[st.group] = ids;
+        if (st.friend) A0.friends.add(st.group);
         break;
       }
       case 'pickup': {
@@ -126,18 +131,21 @@ export class Missions {
         break;
       }
       case 'board':
-        s.car = A0.cars[st.car];
+        s.car = st.car === 'player' ? null : A0.cars[st.car];
         break;
       case 'unboard':
+        // out of the car; off home (or `stay` where they are, for now)
         for (const id of A0.groups[st.group] || []) {
           const p = m.peds.get(id);
           if (!p) continue;
           const c = m.cars.get(p.inCar);
           p.inCar = null;
-          if (c) { p.x = c.x + Math.cos(c.h) * 2; p.z = c.z - Math.sin(c.h) * 2; c.riders = (c.riders || []).filter((r) => r !== id); }
+          if (c) { p.x = c.x - Math.cos(c.h) * 2; p.z = c.z + Math.sin(c.h) * 2; c.riders = (c.riders || []).filter((r) => r !== id); }
+          if (st.stay) { p.walkTo = null; continue; }
           p.walkTo = { x: p.x + 10, z: p.z + 6 };
           p.keep = false;
           p.leaveT = m.t + 6;
+          if (p.friend) { A0.friends.delete(st.group); p.friend = false; }
         }
         break;
       case 'race': {
@@ -146,10 +154,11 @@ export class Missions {
         s.racers = [];
         s.go = m.t + 4;
         m.emit({ t: 'countdown', at: s.go });
-        // the other racers line up beside and behind
+        // the other racers line up on a grid: one in the other lane beside
+        // you, a nose ahead; the rest two by two behind
         for (let k = 0; k < st.racers; k++) {
           const s0 = Math.sin(car.h), c0 = Math.cos(car.h);
-          const back = 7 + k * 7, side = (k % 2 ? -1 : 1) * 2.6;
+          const back = k === 0 ? -3 : 4 + Math.ceil(k / 2) * 7 - 4, side = k % 2 === 0 ? -5.2 : 0;
           const r = m.spawnCar('sports', car.x - s0 * back - c0 * side, car.z - c0 * back + s0 * side, car.h, { paint: [2, 5, 9][k % 3], keep: true, mission: true });
           r.ai = new Driver(m, r, 'park');
           r.driverLook = k % 14;
@@ -160,33 +169,30 @@ export class Missions {
       case 'convoy':
         st.ids.forEach((id, k) => {
           const at = st.at[k];
-          const c = m.spawnCar(st.type, at.x, at.z, at.h, { paint: 4 + k, keep: true, mission: true });
+          const c = m.spawnCar(st.type, at.x, at.z, at.h, { paint: st.paint ?? 4 + k, keep: true, mission: true });
           c.ai = new Driver(m, c, 'cruise');
           c.ai.ignoreLights = true;
           c.driverLook = LOOK_GANG;
-          c.hp = 160;
+          c.hp = st.hp || 160;
           A0.cars[id] = c.id;
         });
         break;
-      case 'mannequins': {
-        const ids = [];
+      case 'loot': {
+        // the bags spill out of the wreck
+        const c = m.cars.get(A0.cars[st.car]);
+        const at = c ? { x: c.x, z: c.z } : st.at || { x: 0, z: 0 };
+        s.ids = [];
         for (let k = 0; k < st.n; k++) {
-          // among the containers, out of the way
-          let x = st.at.x, z = st.at.z, ok = false;
-          for (let tries = 0; tries < 60 && !ok; tries++) {
-            x = st.at.x + (m.rng() - 0.5) * 70; z = st.at.z - 2 - m.rng() * 18;
-            ok = m.openAt(x, z, 0.5) && (tries > 40 || !m.anyoneSees(x, 1.2, z));
+          let x = at.x, z = at.z;
+          for (let tries = 0; tries < 20; tries++) {
+            const a = (k / st.n) * Math.PI * 2 + tries * 0.7, r = 3.2 + tries * 0.4;
+            x = at.x + Math.cos(a) * r; z = at.z + Math.sin(a) * r;
+            if (m.openAt(x, z, 0.4)) break;
           }
-          if (!ok) { x = st.at.x + (k - st.n / 2) * 1.5; z = st.at.z - 4; }
-          const p = makePed('mq', x, z, k % 2 ? LOOK_MQ : LOOK_MQ2);
-          p.hp = 9999;
-          p.group = st.group;
-          p.keep = true;
-          p.anim = A.still;
-          m.addPed(p);
-          ids.push(p.id);
+          const pk = m.addPickup('bag', x, z, { mission: true });
+          s.ids.push(pk.id);
+          A0.pickups[`${st.car}:${k}`] = pk.id;
         }
-        A0.groups[st.group] = ids;
         break;
       }
       case 'target': {
@@ -196,13 +202,6 @@ export class Missions {
         for (const p of m.players) if (p.carry === st.id) p.carry = null;
         break;
       }
-      case 'clear':
-        for (const id of A0.groups[st.group] || []) {
-          const p = m.peds.get(id);
-          if (p) { p.dead = true; p.deadT = 0; p.keep = false; p.anim = A.dead; }
-        }
-        m.emit({ t: 'fx', k: 'collapse' });
-        break;
       case 'wait':
         s.end = m.t + st.s;
         break;
@@ -238,6 +237,8 @@ export class Missions {
         for (const p of m.players) {
           if (p.state !== 'alive') continue;
           if (st.onFoot && p.car != null) continue;
+          // with a friend along, in the same car
+          if (st.with && !(p.car != null && (A0.groups[st.with] || []).some((id) => m.peds.get(id)?.inCar === p.car))) continue;
           if (st.inCar) { const c = car(st.inCar); if (!c || c.dead) { this.fail('The car was wrecked.'); return false; } if (p.car !== c.id) continue; }
           if (st.carry && !m.players.some((q) => q.carry === st.carry && (q.id === p.id || (q.car != null && q.car === p.car)))) continue;
           const pos = m.playerPos(p);
@@ -250,8 +251,22 @@ export class Missions {
       case 'kill': return (A0.groups[st.group] || []).every((id) => { const p = m.peds.get(id); return !p || p.dead; });
       case 'pickup': return !m.pickups.has(A0.pickups[st.id]);
       case 'board': {
-        const c = m.cars.get(s.car);
-        if (!c || c.dead) { this.fail('The getaway car was wrecked.'); return false; }
+        let c = m.cars.get(s.car);
+        if (st.car === 'player') {
+          // whichever car one of you is driving (the nearest)
+          const g = (A0.groups[st.group] || []).map((id) => m.peds.get(id)).find((q) => q && !q.dead);
+          c = null;
+          let bd = Infinity;
+          for (const p of m.players) {
+            if (p.state !== 'alive' || p.car == null || p.seat !== 0) continue;
+            const pc = m.cars.get(p.car);
+            const d = g && pc ? Math.hypot(pc.x - g.x, pc.z - g.z) : 0;
+            if (pc && !pc.dead && d < bd) { bd = d; c = pc; }
+          }
+          // (already riding with one of you: done)
+          if (g && g.inCar != null && m.players.some((p) => p.car === g.inCar)) return true;
+          if (!c) { if (g) { g.walkTo = null; if (g.inCar != null) { const old = m.cars.get(g.inCar); g.inCar = null; if (old) { g.x = old.x - Math.cos(old.h) * 2; g.z = old.z + Math.sin(old.h) * 2; old.riders = (old.riders || []).filter((r) => r !== g.id); } } } return false; }
+        } else if (!c || c.dead) { this.fail('The getaway car was wrecked.'); return false; }
         let all = true;
         for (const id of A0.groups[st.group] || []) {
           const p = m.peds.get(id);
@@ -283,9 +298,8 @@ export class Missions {
         }
         return st.cars.every((id) => { const c = car(id); return !c || c.dead; });
       }
-      case 'mannequins': return true;
+      case 'loot': return s.ids.every((id) => !m.pickups.has(id));
       case 'target': return !m.objects.has(A0.objects[st.id]);
-      case 'clear': return true;
       case 'wait': return m.t >= s.end;
       default: return true;
     }
@@ -370,7 +384,6 @@ export class Missions {
       for (const id of ids) {
         const p = m.peds.get(id);
         if (!p) continue;
-        if (p.kind === 'mq') { m.removePed(p); continue; }
         p.keep = false;
         if (p.inCar != null) { const c = m.cars.get(p.inCar); if (c) c.riders = []; m.removePed(p); }
       }
@@ -399,6 +412,7 @@ export class Missions {
         case 'kill': for (const id of A0.groups[st.group] || []) { const p = m.peds.get(id); if (p && !p.dead) blips.push({ ped: p.id, k: 'enemy' }); } break;
         case 'pickup': { const pk = m.pickups.get(A0.pickups[st.id]); if (pk) blips.push({ x: pk.x, z: pk.z, k: 'pickup' }); break; }
         case 'board': { const c = m.cars.get(A0.s.car); if (c) blips.push({ car: c.id, k: 'car' }); for (const id of A0.groups[st.group] || []) { const p = m.peds.get(id); if (p && p.inCar == null && !p.dead) blips.push({ ped: p.id, k: 'friend' }); } break; }
+        case 'loot': for (const id of A0.s.ids || []) { const pk = m.pickups.get(id); if (pk) blips.push({ x: pk.x, z: pk.z, k: 'pickup' }); } break;
         case 'race': { const pts = st.points; const i = A0.s.idx || 0; if (pts[i]) blips.push({ x: pts[i][0], z: pts[i][1], k: 'check', r: 13 }); if (pts[i + 1]) blips.push({ x: pts[i + 1][0], z: pts[i + 1][1], k: 'check2' }); for (const id of A0.s.racers || []) blips.push({ car: id, k: 'enemy' }); break; }
         case 'destroy': for (const id of st.cars) { const c = car(id); if (c && !c.dead) blips.push({ car: c.id, k: 'enemy' }); } break;
         case 'target': { const o = m.objects.get(A0.objects[st.id]); if (o) blips.push({ x: o.x, z: o.z, k: 'enemy' }); break; }

@@ -1,5 +1,6 @@
-// The buildings you can walk into: your place, Kingsgate Arms, Sal's Diner,
-// and the offices of the three people with work for you. Each has a door on
+// The buildings you can walk into: your place (where Dre is usually on the
+// sofa), Freedom Arms, Sal's Diner, Okafor's office at the car lot, Voss's
+// at the freight yard, and Vince Moreno's study up in Palm Ridge. Each has a door on
 // the front of its building in the city; walk into it and you're inside.
 // The rooms themselves are laid out out at sea off the south-east coast
 // (world.js's ROOMS_BOX), where nobody outside will see them, a row of the
@@ -89,12 +90,12 @@ room('home', {
     { t: 'window', x: 18, z: 0.02, w: 1.6, d: 0.04, h: 1.2, y: 1.0, solid: false },
     { t: 'poster', x: 21.96, z: 4.2, w: 0.02, d: 1.0, h: 1.4, y: 1.0, solid: false, col: 0xc84a2a, face: 'w' },
   ],
-  spots: { save: { x: 19.5, z: 4.4 }, wake: { x: 18.2, z: 4.2, h: Math.PI / 2 } },
+  spots: { save: { x: 19.5, z: 4.4 }, wake: { x: 18.2, z: 4.2, h: Math.PI / 2 }, giver: { x: 9.4, z: 6.8, h: -Math.PI / 2 }, job: { x: 7.7, z: 6.8 } },
 });
 
-// ---------------------------------------------------------- Kingsgate Arms
+// ---------------------------------------------------------- Freedom Arms
 room('guns', {
-  name: 'Kingsgate Arms', kind: 'shop', place: 'guns', building: 'Kingsgate Arms',
+  name: 'Freedom Arms', kind: 'shop', place: 'guns', building: 'Freedom Arms',
   x0: IX, z0: 320, w: 12, d: 10, doorX: 6, floor: 'tile', wall: 0x8a8478,
   lights: [[6, 5]],
   items: [
@@ -170,18 +171,23 @@ room('voss', {
   spots: { giver: { x: 4, z: 1.4, h: 0 }, job: { x: 4.6, z: 5.2 } },
 });
 
-room('dale', {
-  name: "Mercer's Pawn", kind: 'office', place: 'dale', building: "Mercer's Pawn",
-  x0: IX, z0: 416, w: 12, d: 10, doorX: 6, floor: 'lino', wall: 0x8a7a5a,
+// Vince Moreno's study: books, a big desk, a bar, a painting of a boat
+room('vince', {
+  name: 'Moreno Estate', kind: 'office', place: 'vince', building: 'Moreno Estate',
+  x0: IX, z0: 416, w: 12, d: 10, doorX: 6, floor: 'wood', wall: 0x4a3a2a,
   lights: [[6, 5]],
   items: [
-    { t: 'counter', x: 6, z: 3, w: 6, d: 0.8, h: 1.0, col: 0x4a3a28, glass: true },
-    { t: 'shelf', x: 6, z: 0.3, w: 9, d: 0.5, h: 2.2, col: 0x5a4a32, junk: true },
-    { t: 'shelf', x: 0.3, z: 6, w: 0.5, d: 5, h: 2.0, col: 0x5a4a32, junk: true, face: 'e' },
-    { t: 'tvstack', x: 11.2, z: 6.5, w: 1.2, d: 1.2, h: 1.6, face: 'w' },
-    { t: 'guitar', x: 11.9, z: 3, w: 0.1, d: 0.4, h: 1.1, y: 0.9, solid: false, face: 'w' },
+    { t: 'desk', x: 6, z: 2.8, w: 2.8, d: 1.2, h: 0.78, col: 0x3a2412, face: 'n' },
+    { t: 'chair', x: 5.2, z: 4.5, w: 0.55, d: 0.55, h: 0.95, col: 0x5a2a1a, face: 'n' },
+    { t: 'chair', x: 6.8, z: 4.5, w: 0.55, d: 0.55, h: 0.95, col: 0x5a2a1a, face: 'n' },
+    { t: 'shelf', x: 6, z: 0.3, w: 9, d: 0.5, h: 2.4, col: 0x3a2412, books: true },
+    { t: 'counter', x: 0.5, z: 6.5, w: 0.8, d: 3, h: 1.05, col: 0x2a1a10, face: 'e' },
+    { t: 'sofa', x: 11.3, z: 6.6, w: 0.95, d: 2.4, h: 0.85, col: 0x6a2a1a, face: 'w' },
+    { t: 'plant', x: 11.3, z: 0.8, w: 0.6, d: 0.6, h: 1.5 },
+    { t: 'poster', x: 11.96, z: 3.4, w: 0.02, d: 1.8, h: 1.2, y: 1.2, solid: false, col: 0x2a5a8a, face: 'w' },
+    { t: 'window', x: 3, z: 9.96, w: 2.4, d: 0.04, h: 1.4, y: 0.9, solid: false, face: 'n' },
   ],
-  spots: { giver: { x: 6, z: 1.9, h: 0 }, job: { x: 6, z: 4.6 } },
+  spots: { giver: { x: 6, z: 1.7, h: 0 }, job: { x: 6, z: 5.8 } },
 });
 
 export const INTERIOR = Object.fromEntries(INTERIORS.map((r) => [r.id, r]));
@@ -194,7 +200,7 @@ export function interiorAt(x, z) {
 }
 
 // where the jobs' givers wait (in their offices)
-export const GIVER_ROOMS = { okafor: 'okafor', voss: 'voss', dale: 'dale' };
+export const GIVER_ROOMS = { dre: 'home', okafor: 'okafor', voss: 'voss', vince: 'vince' };
 
 // the walls, the ceiling (for the camera) and the furniture, as solid boxes
 export function interiorSolids() {
