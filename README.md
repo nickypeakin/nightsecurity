@@ -7,39 +7,47 @@ then take the highway out of town and see the rest of the island, from
 morning till night and round again. The story, places, characters and map
 are all original. (GTA 7 isn't affiliated with or endorsed by Rockstar Games.)
 
-You're Isaiah "Zay" Carter from the Flats: twenty-three, broke, with a car
-and a best friend, Dre, who is always one bad idea from trouble. The game
-opens at home at eight in the morning. Dre's in your living room eating your
-cereal, and he's found the two of you some work. The people with jobs:
+You're **Franklin**, from the Flats: young, broke, and repossessing cars
+for a dealer who isn't as honest as he says. The game opens at home at
+eight in the morning, with your best friend **Lamar** shouting from the
+living room. He's got work. The people with jobs:
 
-- **Dre**, who brings you the first one and owes money to the wrong people.
-- **Ray Okafor**, who sells cars in Eastgate and buys back the ones people
-  stopped paying for.
-- **Lena Voss**, who runs the freight yards at the Docks and everything that
-  goes through them.
-- **Vince Moreno**, who robbed armoured trucks for twenty years and retired to
-  a big house in Palm Ridge, mostly.
+- **Lamar Davis**, your best friend since the second grade, who is sure
+  the next idea is the one.
+- **Simeon Yetarian**, who sells cars in Eastgate and sends you to take
+  them back when people stop paying.
+- **Michael De Santa**, who used to rob banks for a living, retired to a big
+  house in Palm Ridge, and is very bored.
+- **Lester Crest**, who plans the jobs. **Trevor Philips**, Michael's old
+  partner, mostly ruins them. And **Stretch**, Lamar's old friend, is out of
+  prison and running with the Ballas now.
 
-Each of them waits in their room (Dre in your living room, the others in
-their offices): walk in through the door and step into the ring in front of
-them, and the job starts with a cutscene. There are eight jobs:
+(The names are a fan's homage to GTA V's people. The story and every line
+of it are new.)
 
-1. **Easy Money** (Dre): Dre rides along to Pelican Beach to repossess a car
-   for Okafor.
-2. **Alarm Bells** (Okafor): steal a dentist's Kestrel in Palm Ridge, lose
-   the police (or get a respray at Spray-N-Go) and bring it in.
-3. **Bad Company** (Dre): Dre owes Teddy Brill two grand. A gunfight at the
-   Pool Hall on the Strip.
-4. **The Driver** (Voss): wait outside the Diamond Exchange downtown, then
-   get the crew to Pier 9 with three stars on you.
-5. **Street Kings** (Dre): a fifteen-checkpoint street race from Starlight
-   through Downtown and Eastgate.
-6. **Hot Cargo** (Voss): take a truck from San Cielo International and lose
-   the police before you get back to the Docks.
-7. **The Score** (Vince): stop an armoured truck, grab the cash bags and lose
-   four stars.
-8. **Paid in Full** (Vince): Voss has taken Dre. A shootout at the container
-   terminal, and you get him home.
+When somebody has work, your phone rings and their letter shows up on the
+radar. Their job is waiting in their room (Lamar's in your living room, the
+others in their offices): walk in through the door and step into the ring
+in front of them, and it starts with a cutscene. There are nine jobs:
+
+1. **Franklin and Lamar** (Lamar): down to Pelican Beach together to take
+   back two cars for Simeon, then race each other back to the lot.
+2. **Repossession** (Simeon): take a car back out of a Ballas yard in Mill
+   End while they shoot at you.
+3. **Complications** (Simeon): an easy repo in Palm Ridge, except the owner,
+   Michael, is hiding in the back seat, and he wants a word with Simeon.
+4. **Old Friends** (Lamar): Stretch wants to meet at the Pool Hall on the
+   Strip. It's an ambush.
+5. **The Driver** (Michael): Michael rides along while you wait outside the
+   Diamond Exchange, then you get his crew to Pier 9 with three stars on you.
+6. **Street Kings** (Lamar): a fifteen-checkpoint street race against
+   Stretch, from Starlight through Downtown and Eastgate.
+7. **Trevor** (Michael): Michael's old partner is at the airport with a
+   truck that isn't his. Get him and the truck to Lester's.
+8. **The Score** (Lester): stop an armoured truck, grab the cash bags and
+   lose four stars.
+9. **The Long Stretch** (Michael): Stretch has taken Lamar to the container
+   terminal. Go and get your friend.
 
 Between jobs the city is yours. Twenty hidden packages are scattered round
 town and the island ($500 each, and a bonus for finding them all). Guns and
@@ -55,17 +63,17 @@ The city is a kilometre across with an uneven, stepped edge. Its districts:
 - **Pelican Beach**, the boardwalk and sand along the west side, with the
   pier and its café.
 - **Palm Ridge** in the north-west: palm-lined streets, big modern houses
-  with pools, and the Moreno Estate.
+  with pools, and Michael's.
 - **Starlight**, the entertainment district: the Starlight Theatre, the
   Grand Hotel, clubs, cinemas and the Strip.
 - **Downtown**, with the towers, City Hall's plaza, the Diamond Exchange and
   the bank. **Grand Park** and **Mercy Hill**, with the hospital, are north
   of it.
-- **Mirror Hills** and **Eastgate** in the east, with Okafor's Motors.
+- **Mirror Hills** and **Eastgate** in the east, with Simeon's Motors.
 - **The Flats**, where you live: small houses, the police station and the
   rail yard.
 - **Mill End** and **The Docks** in the south-east: warehouses, Spray-N-Go,
-  Voss Freight and the container terminal, with **the Harbour** and its
+  Lester's warehouse and the container terminal, with **the Harbour** and its
   cranes along the south shore.
 
 ## The island
@@ -116,13 +124,14 @@ help.
 
 ## How it plays
 
-- **Jobs.** The big letters on the radar (D, O, V, M) are the people with
-  work. Go in through their door and step into the glowing ring in front of
-  them to start a job (you can't have any stars).
+- **Jobs.** Your phone rings when somebody has work. The big letter on the
+  radar (L for Lamar, S for Simeon, M for Michael, L in purple for Lester)
+  shows where they are. Go in through their door and step into the glowing
+  ring in front of them to start the job (you can't have any stars).
   The objective is at the bottom of the screen, and what you need is on the
   radar: yellow for where to go, blue for a car or a friend, red for a
-  target, green for something to pick up. If Dre's along and he goes down,
-  the job's failed. Fail one and you can walk back in and try again.
+  target, green for something to pick up. If Lamar, Michael or Trevor is
+  along and goes down, the job's failed. Fail one and you can walk back in and try again.
 - **Stars.** Crimes make the police want you: stealing cars (especially
   theirs), hitting or running people over, gunfire, killing. Stars bring
   police cars, then officers on foot, and from two stars they shoot. Get out
@@ -131,12 +140,17 @@ help.
   hold of you and you're **busted**: you lose your guns and $150. Die and
   you're **wasted**, and the hospital charges $100.
 - **Buildings.** Walk into a glowing door to go inside (you can't with the
-  police after you): your place, Freedom Arms, Sal's Diner, Okafor's Motors,
-  Voss Freight and the Moreno Estate. Nobody fights indoors.
+  police after you): your place, Freedom Arms, Sal's Diner, Simeon's Motors,
+  Lester's warehouse and Michael's house. Nobody fights indoors.
 - **Your place and your car.** Your Kestrel is parked by your house (the
   blue arrow on the radar). Wreck it and a new one turns up there. Walk up to
   your bed to save. The game also saves when you pass a job or find a
   package, and **Continue** on the main menu picks up where you left off.
+
+- **Graphics.** In **Settings**, **Auto** draws at your screen's full
+  resolution (all of it on a high-density laptop or monitor) and only
+  steps down a little if your computer can't keep up. **High** always draws
+  everything, and **Low** is for old laptops.
 
 ## Playing with friends
 
@@ -239,7 +253,8 @@ public/
     match.js              the city: players, cars, shooting, pickups, the shop,
                           crashes and fires, streaming traffic and people in
     drivers.js            traffic: lanes, turns, red lights, chases, races
-    peds.js               people on the pavements, gangs, cops on foot, Dre
+    peds.js               people on the pavements, the Ballas, cops on foot,
+                          and whoever's along on the job
     police.js             stars, dispatch, chases, arrests
     missions.js           the jobs, step by step
     timers.js
@@ -265,8 +280,8 @@ test/
                           traffic out on the highways and a drive to Port
                           Kerry, the police, busted and wasted, carjacking,
                           fires, packages, the gun counter and the diner,
-                          saving, co-op, and all eight jobs played start to
-                          finish
+                          saving, co-op, the phone calls, and all nine jobs
+                          played start to finish
   walk.test.js            the city's districts; every lane, junction and
                           parking space has room for a car; every place,
                           package, pickup and door can be walked to; inside,

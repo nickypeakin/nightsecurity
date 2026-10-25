@@ -1,7 +1,7 @@
 // The opening, before you get control: San Cielo from the air on a sunny
 // morning, in over the harbour to the Flats, your street and your car out
-// front, then you, asleep, until the alarm goes and Dre starts shouting
-// from the living room. He's got work. Timed by the host's clock for the
+// front, then Franklin, asleep, until the alarm goes and Lamar starts
+// shouting from the living room. He's got work. Timed by the host's clock for the
 // intro (so everyone in the game sees it together); Space skips it.
 
 import * as THREE from 'three';
@@ -28,11 +28,11 @@ const SHOTS = [
 
 // what's said, and when
 const LINES = [
-  [16.8, 'Dre', 'dre', 'Zay! Zay! You up?', 2.2],
-  [19.4, 'Zay', 'you', 'I am now.', 1.6],
-  [21.4, 'Dre', 'dre', 'Get out here, man. I got us some work. Real money this time.', 3.4],
-  [25.2, 'Zay', 'you', "That's what you said last time.", 2.2],
-  [27.8, 'Dre', 'dre', "Last time doesn't count. Come on!", 2.6],
+  [16.8, 'Lamar', 'lamar', 'F! Franklin! You up, dog?', 2.2],
+  [19.4, 'Franklin', 'you', 'I am now.', 1.6],
+  [21.4, 'Lamar', 'lamar', "Get out here, homie. Simeon's got work. Real money this time.", 3.4],
+  [25.2, 'Franklin', 'you', "That's what you said last time.", 2.2],
+  [27.8, 'Lamar', 'lamar', "Last time doesn't count! Come on!", 2.6],
 ];
 
 export class Opening {

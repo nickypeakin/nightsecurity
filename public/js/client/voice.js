@@ -1,17 +1,18 @@
 // Spoken lines, using the voices built into the browser (speechSynthesis):
-// Dre, Okafor, Voss and Vince giving you jobs, you answering back, the
-// police dispatcher, people in
-// the street. Subtitles always show, so a browser without voices loses
+// Lamar, Simeon, Michael, Lester and Trevor talking you into things,
+// Franklin answering back, the police dispatcher, people in the street. Subtitles always show, so a browser without voices loses
 // nothing but the sound. Can be switched off in Settings. (From Cinder
 // Peak.)
 
 const STYLE = {
-  okafor: { pitch: 0.85, rate: 0.98, sex: 'm' },
-  voss: { pitch: 0.92, rate: 0.96, sex: 'f' },
-  dre: { pitch: 1.08, rate: 1.14, sex: 'm' },
-  vince: { pitch: 0.72, rate: 0.9, sex: 'm', volume: 0.9 },
-  you: { pitch: 0.95, rate: 1.02, sex: 'm' },
-  brill: { pitch: 0.6, rate: 1.05, sex: 'm' },
+  lamar: { pitch: 1.12, rate: 1.18, sex: 'm' },
+  simeon: { pitch: 0.9, rate: 0.94, sex: 'm' },
+  michael: { pitch: 0.74, rate: 0.95, sex: 'm', volume: 0.9 },
+  trevor: { pitch: 0.82, rate: 1.16, sex: 'm' },
+  lester: { pitch: 1.18, rate: 0.92, sex: 'm', volume: 0.85 },
+  stretch: { pitch: 0.62, rate: 1.0, sex: 'm' },
+  ballas: { pitch: 0.7, rate: 1.1, sex: 'm' },
+  you: { pitch: 0.88, rate: 1.0, sex: 'm' },
   radio: { pitch: 1.1, rate: 1.1, sex: 'f', volume: 0.75 },
   ped: { pitch: 1.05, rate: 1.15, sex: null, volume: 0.6 },
   cop: { pitch: 0.8, rate: 1.1, sex: 'm', volume: 0.7 },

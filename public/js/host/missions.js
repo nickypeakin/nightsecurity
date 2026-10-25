@@ -3,11 +3,11 @@
 // any step. Walk into the next job's marker (with no police after you) to
 // start it.
 
-import { MISSIONS, PEOPLE } from '../shared/story.js';
+import { MISSIONS, PEOPLE, NAMES } from '../shared/story.js';
 import { PLACES } from '../shared/city.js';
 import { INTERIOR, GIVER_ROOMS } from '../shared/interiors.js';
 import { WEAPON_INDEX, WEAPONS } from '../shared/config.js';
-import { makePed, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS } from './peds.js';
+import { makePed, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_OF } from './peds.js';
 import { Driver } from './drivers.js';
 
 const MARKER_R = 2.2;
@@ -19,6 +19,7 @@ export class Missions {
     this.active = null;
     this.version = 0;          // bumped whenever what players should see changes
     this.cool = 0;
+    this.callAt = 0;           // when the next job's giver rings you
   }
 
   get next() { return MISSIONS[this.done] || null; }
@@ -37,6 +38,12 @@ export class Missions {
   step(dt) {
     const m = this.m;
     this.cool = Math.max(0, this.cool - dt);
+    // the phone: whoever has the next job calls about it
+    if (this.callAt && m.t >= this.callAt) {
+      this.callAt = 0;
+      const n = this.next;
+      if (n?.call && !this.active) { m.sound('ring'); m.dialog(n.call, { phone: true, after: 1.6 }); }
+    }
     if (!this.active) {
       const mk = this.marker();
       if (!mk || this.cool > 0) return;
@@ -49,7 +56,7 @@ export class Missions {
     const A0 = this.active;
     // everyone down: that's the job gone; so is a friend
     if (m.players.every((p) => p.state !== 'alive')) { this.fail('You were taken out.'); return; }
-    for (const g of A0.friends) if ((A0.groups[g] || []).every((id) => { const q = m.peds.get(id); return !q || q.dead; })) { this.fail(`${g === 'dre' ? 'Dre' : 'Your friend'} died.`); return; }
+    for (const g of A0.friends) if ((A0.groups[g] || []).every((id) => { const q = m.peds.get(id); return !q || q.dead; })) { this.fail(`${NAMES[g] || 'Your friend'} died.`); return; }
     const st = A0.def.steps[A0.idx];
     if (!st) { this.pass(); return; }
     if (!A0.begun) { A0.begun = true; A0.s = {}; this.begin(st); if (!this.active) return; this.changed(); }
@@ -104,7 +111,10 @@ export class Missions {
         for (let k = 0; k < st.n; k++) {
           const a = (k / st.n) * Math.PI * 2;
           const boss = st.boss && k === 0;
-          const look = st.look === 'dre' ? LOOK_DRE : boss && st.bossLook === 'voss' ? LOOK_VOSS : st.kind === 'crew' ? LOOK_CREW : boss ? LOOK_BOSS : LOOK_GANG;
+          // (a named look for whoever's named: `looks` one each, or `look`
+          // for them all, `bossLook` for the boss)
+          const named = st.looks?.[k] ?? (boss && st.bossLook ? st.bossLook : st.look);
+          const look = named && LOOK_OF[named] != null ? LOOK_OF[named] : st.kind === 'crew' ? LOOK_CREW : boss ? LOOK_BOSS : LOOK_GANG;
           const p = makePed(st.kind === 'crew' ? 'crew' : 'gang', st.at.x + Math.cos(a) * (boss ? 0 : 2.5), st.at.z + Math.sin(a) * 1.2, look);
           p.hp = st.friend ? 400 : boss ? 110 : 60;
           p.w = st.friend ? 0 : WEAPON_INDEX[st.weapon] || 1;
@@ -114,6 +124,9 @@ export class Missions {
           p.keep = true;
           m.addPed(p);
           ids.push(p.id);
+          // already sitting in one of the job's cars (hiding in the back seat)
+          const c = st.inCar ? m.cars.get(A0.cars[st.inCar]) : null;
+          if (c) { p.inCar = c.id; p.x = c.x; p.z = c.z; c.riders = [...(c.riders || []), p.id]; }
         }
         A0.groups[st.group] = ids;
         if (st.friend) A0.friends.add(st.group);
@@ -154,6 +167,11 @@ export class Missions {
         s.racers = [];
         s.go = m.t + 4;
         m.emit({ t: 'countdown', at: s.go });
+        // somebody on the job takes the wheel of the first rival car
+        if (st.driver) {
+          for (const id of A0.groups[st.driver] || []) { const q = m.peds.get(id); if (q) m.removePed(q); }
+          A0.friends.delete(st.driver);
+        }
         // the other racers line up on a grid: one in the other lane beside
         // you, a nose ahead; the rest two by two behind
         for (let k = 0; k < st.racers; k++) {
@@ -161,7 +179,7 @@ export class Missions {
           const back = k === 0 ? -3 : 4 + Math.ceil(k / 2) * 7 - 4, side = k % 2 === 0 ? -5.2 : 0;
           const r = m.spawnCar('sports', car.x - s0 * back - c0 * side, car.z - c0 * back + s0 * side, car.h, { paint: [2, 5, 9][k % 3], keep: true, mission: true });
           r.ai = new Driver(m, r, 'park');
-          r.driverLook = k % 14;
+          r.driverLook = k === 0 && st.rivalLook ? LOOK_OF[st.rivalLook] : k % 14;
           s.racers.push(r.id);
         }
         break;
@@ -275,7 +293,8 @@ export class Missions {
           all = false;
           const d = Math.hypot(c.x - p.x, c.z - p.z);
           p.walkTo = { x: c.x, z: c.z };
-          if (d < 2.6 && Math.abs(c.v) < 2) {
+          // (close enough to the door, or pressed up against either end)
+          if (d < Math.max(2.6, (c.hl || 2.3) + 0.7) && Math.abs(c.v) < 2) {
             p.inCar = c.id;
             c.riders = [...(c.riders || []), p.id];
             p.walkTo = null;
@@ -354,6 +373,7 @@ export class Missions {
     this.done++;
     this.active = null;
     this.cool = 4;
+    this.callAt = m.t + 8;
     m.save();
     if (def.final) m.emit({ t: 'credits' });
     this.changed();

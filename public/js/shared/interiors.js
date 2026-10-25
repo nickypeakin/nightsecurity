@@ -1,6 +1,7 @@
-// The buildings you can walk into: your place (where Dre is usually on the
-// sofa), Freedom Arms, Sal's Diner, Okafor's office at the car lot, Voss's
-// at the freight yard, and Vince Moreno's study up in Palm Ridge. Each has a door on
+// The buildings you can walk into: your place (where Lamar is usually in
+// the living room), Freedom Arms, Sal's Diner, Simeon's office at his car
+// lot, Lester's warehouse at the Docks, and Michael's study up in Palm
+// Ridge. Each has a door on
 // the front of its building in the city; walk into it and you're inside.
 // The rooms themselves are laid out out at sea off the south-east coast
 // (world.js's ROOMS_BOX), where nobody outside will see them, a row of the
@@ -136,8 +137,8 @@ room('diner', {
 });
 
 // ------------------------------------------------------------- the offices
-room('okafor', {
-  name: "Okafor's Motors", kind: 'office', place: 'okafor', building: "Okafor's Motors",
+room('simeon', {
+  name: "Simeon's Motors", kind: 'office', place: 'simeon', building: "Simeon's Motors",
   x0: IX, z0: 368, w: 12, d: 10, doorX: 6, floor: 'carpet', wall: 0xc8c0a8,
   lights: [[6, 5]],
   items: [
@@ -155,8 +156,9 @@ room('okafor', {
   spots: { giver: { x: 6, z: 1.7, h: 0 }, job: { x: 6, z: 5.6 } },
 });
 
-room('voss', {
-  name: 'Voss Freight', kind: 'office', place: 'voss', building: 'VOSS FREIGHT',
+// Lester's: a desk, a map of the city on the wall, boxes of who knows what
+room('lester', {
+  name: "Lester's Warehouse", kind: 'office', place: 'lester', building: 'CREST STORAGE',
   x0: IX, z0: 392, w: 12, d: 10, doorX: 6, floor: 'concrete', wall: 0x7a8088,
   lights: [[6, 5]],
   items: [
@@ -171,9 +173,9 @@ room('voss', {
   spots: { giver: { x: 4, z: 1.4, h: 0 }, job: { x: 4.6, z: 5.2 } },
 });
 
-// Vince Moreno's study: books, a big desk, a bar, a painting of a boat
-room('vince', {
-  name: 'Moreno Estate', kind: 'office', place: 'vince', building: 'Moreno Estate',
+// Michael's study: books, a big desk, a bar, a painting of a boat
+room('michael', {
+  name: "Michael's House", kind: 'office', place: 'michael', building: 'De Santa House',
   x0: IX, z0: 416, w: 12, d: 10, doorX: 6, floor: 'wood', wall: 0x4a3a2a,
   lights: [[6, 5]],
   items: [
@@ -200,7 +202,7 @@ export function interiorAt(x, z) {
 }
 
 // where the jobs' givers wait (in their offices)
-export const GIVER_ROOMS = { dre: 'home', okafor: 'okafor', voss: 'voss', vince: 'vince' };
+export const GIVER_ROOMS = { lamar: 'home', simeon: 'simeon', lester: 'lester', michael: 'michael' };
 
 // the walls, the ceiling (for the camera) and the furniture, as solid boxes
 export function interiorSolids() {

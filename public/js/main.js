@@ -38,7 +38,8 @@ const TIPS = [
   'Freedom Arms on the Strip sells pistols, SMGs, shotguns and body armour.',
   'Twenty hidden packages are tucked away round San Cielo and the island. Each one pays $500.',
   'Take the Hill Road north out of town for the Starlight sign, the desert and Mount Harlow.',
-  'Dre lives on your sofa. When he has an idea, the D on the radar lights up.',
+  'Lamar practically lives in your living room. When he has an idea, the L on the radar lights up.',
+  'Your phone rings when somebody has work for you. Their letter shows up on the radar.',
   'Hold Space while driving for the handbrake. It helps round corners.',
   'Press M for the map. The big letters are the people with work for you.',
 ];
@@ -103,24 +104,25 @@ let solo = false;
 let backTo = 'title';
 let paused = false;
 
-// Graphics: 'auto' starts at the screen's own resolution and steps down a
-// ladder while frames take too long (a little resolution, no glow or
-// anti-aliasing, less resolution again), climbing back when there's
-// headroom. 'high' keeps everything, including the extra pixels of
-// high-density screens; 'low' starts at the bottom.
+// Graphics: 'auto' starts at the screen's own resolution (all of it, on a
+// high-density screen) and steps down a ladder while frames take too long
+// (anti-aliasing first, then a little resolution, then the glow), climbing
+// back when there's headroom, but never below `minRatio` pixels per CSS
+// pixel, so it never goes properly blurry. 'high' keeps everything; 'low'
+// starts at the bottom and goes lower.
 // `?scale=0.5` fixes the resolution (used by tests).
 const LADDER = [
   { scale: 1, samples: 2, bloom: true },
-  { scale: 0.85, samples: 2, bloom: true },
-  { scale: 0.75, samples: 0, bloom: true },
-  { scale: 0.7, samples: 0, bloom: false },
-  { scale: 0.6, samples: 0, bloom: false },
+  { scale: 1, samples: 0, bloom: true },
+  { scale: 0.85, samples: 0, bloom: true },
+  { scale: 0.75, samples: 0, bloom: false },
+  { scale: 0.65, samples: 0, bloom: false },
   { scale: 0.5, samples: 0, bloom: false },
 ];
 const PRESETS = {
-  auto: { maxDpr: 1, top: 0, bottom: LADDER.length - 1 },
-  high: { maxDpr: 2, top: 0, bottom: 0, fixed: { samples: 4 } },
-  low: { maxDpr: 1, top: LADDER.length - 2, bottom: LADDER.length - 1 },
+  auto: { maxDpr: 2, minRatio: 0.9, top: 0, bottom: LADDER.length - 1 },
+  high: { maxDpr: 2, minRatio: 1, top: 0, bottom: 0, fixed: { samples: 4 } },
+  low: { maxDpr: 1, minRatio: 0.6, top: LADDER.length - 3, bottom: LADDER.length - 1 },
 };
 const fixedScale = Number(params.get('scale')) || 0;
 let preset = PRESETS[settings.graphics] || PRESETS.auto;
@@ -131,7 +133,7 @@ let frameAvg = 1 / 60, judgeT = 0, calmT = 0, upWait = 6, sinceUp = 99;
 function setLevel(i) {
   level = i;
   const L = { ...LADDER[i], ...(preset.fixed || {}) };
-  post.configure({ maxDpr: preset.maxDpr, samples: L.samples, bloom: L.bloom });
+  post.configure({ maxDpr: preset.maxDpr, minRatio: fixedScale ? 0 : preset.minRatio, samples: L.samples, bloom: L.bloom });
   quality = fixedScale || L.scale;
   post.setSize(innerWidth, innerHeight, quality);
 }
@@ -160,12 +162,12 @@ function adaptQuality(dt) {
   sinceUp += dt;
   if (judgeT < 1) return;
   judgeT = 0;
-  if (frameAvg > 1 / 45 && level < preset.bottom) {
+  if (frameAvg > 1 / 40 && level < preset.bottom) {
     if (sinceUp < 5) upWait = Math.min(60, upWait * 2);
-    setLevel(Math.min(preset.bottom, level + (frameAvg > 1 / 28 ? 2 : 1)));
+    setLevel(Math.min(preset.bottom, level + (frameAvg > 1 / 26 ? 2 : 1)));
     frameAvg = 1 / 50;
     calmT = 0;
-  } else if (frameAvg < 1 / 57 && level > preset.top && calmT > upWait) {
+  } else if (frameAvg < 1 / 55 && level > preset.top && calmT > upWait) {
     setLevel(level - 1);
     calmT = 0;
     sinceUp = 0;

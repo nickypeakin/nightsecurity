@@ -375,17 +375,24 @@ function eyeMat(iris, glint = false) {
 // ----------------------------------------------------------------- looks --
 // Skin tones, hair, clothes. `top` and `bottom` pick the garments below.
 export const LOOKS = {
-  // the four of you, in player-colour order (Zay first)
-  friend0: { sex: 'm', skin: 0xdcae8a, iris: 0x4a3423, hair: 'short', hairColor: 0x2a1a10, top: 'jacket', topColor: 0x3a2418, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.8 },
+  // the four of you, in player-colour order (Franklin first: white tee,
+  // dark jeans, clean sneakers)
+  friend0: { sex: 'm', skin: 0x6a4430, iris: 0x1e140c, hair: 'buzz', hairColor: 0x0e0a08, top: 'tee', topColor: 0xeeeeea, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xf2f2ee, height: 1.8 },
   friend1: { sex: 'f', skin: 0x8a5638, iris: 0x2d1d12, hair: 'bun', hairColor: 0x120c09, top: 'bomber', topColor: 0x4a5a3a, inner: 0x1e1e1e, bottom: 'jeans', bottomColor: 0x1a1c22, shoes: 'sneaker', shoeColor: 0xe8e8e2, height: 1.67 },
   friend2: { sex: 'm', skin: 0xb77a52, iris: 0x3b2817, hair: 'buzz', hairColor: 0x15100c, top: 'hoodie', topColor: 0x5a5a62, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0x1a1a1a, height: 1.84 },
   friend3: { sex: 'f', skin: 0xf0c8a6, iris: 0x45708a, hair: 'pony', hairColor: 0x9a4a2a, top: 'jacket', topColor: 0x5a7fa8, bottom: 'trousers', bottomColor: 0x141416, shoes: 'boot', shoeColor: 0x141414, height: 1.64 },
-  // Ray Okafor, who sells cars in Eastgate
-  manager: { sex: 'm', skin: 0x5a3a28, iris: 0x1a120c, hair: 'buzz', hairColor: 0x2a2a28, glasses: true, top: 'suit', topColor: 0x34363c, inner: 0xe8e8e2, tie: 0x8a1a2a, bottom: 'trousers', bottomColor: 0x2a2c30, shoes: 'dress', shoeColor: 0x0e0e0e, height: 1.83, heavy: 1.05 },
-  // Dre: green hoodie, cap on backwards, never still
-  dre: { sex: 'm', skin: 0x6a4430, iris: 0x1e140c, hair: 'buzz', hairColor: 0x120c09, hat: 'cap', hatColor: 0x1a1a1a, top: 'hoodie', topColor: 0x2a6a3a, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xf2f2ee, height: 1.78 },
-  // Vince Moreno, retired: grey, tanned, a good suit and no tie
-  vince: { sex: 'm', skin: 0xd8a07a, iris: 0x3a2a1a, hair: 'slick', hairColor: 0x9a9890, glasses: true, old: true, top: 'suit', topColor: 0xd8d0c0, inner: 0x4a6a8a, bottom: 'trousers', bottomColor: 0xd8d0c0, shoes: 'dress', shoeColor: 0x4a2a1a, height: 1.82, heavy: 1.06 },
+  // Lamar: tall, loud, an orange hoodie and a cap, never still
+  lamar: { sex: 'm', skin: 0x5a3a28, iris: 0x1e140c, hair: 'buzz', hairColor: 0x120c09, hat: 'cap', hatColor: 0x1a1a1a, top: 'hoodie', topColor: 0xc8741a, bottom: 'jeans', bottomColor: 0x2a3448, shoes: 'sneaker', shoeColor: 0xf2f2ee, height: 1.9 },
+  // Simeon, who sells cars: a shiny suit, a moustache, a big smile
+  simeon: { sex: 'm', skin: 0xc8a07a, iris: 0x2a1a10, hair: 'balding', hairColor: 0x2a2420, mustache: true, top: 'suit', topColor: 0x3a3a42, inner: 0xe8e8e2, tie: 0x8a1a2a, bottom: 'trousers', bottomColor: 0x2a2c30, shoes: 'dress', shoeColor: 0x0e0e0e, height: 1.72, heavy: 1.1 },
+  // Michael, retired: slicked-back hair, a good suit and no tie
+  michael: { sex: 'm', skin: 0xe0b090, iris: 0x3a4a5a, hair: 'slick', hairColor: 0x3a2a1a, top: 'suit', topColor: 0x2a2c34, inner: 0xa8c0d8, bottom: 'trousers', bottomColor: 0x2a2c34, shoes: 'dress', shoeColor: 0x2a1a10, height: 1.83, heavy: 1.06 },
+  // Trevor: thinning hair, a stained T-shirt, work boots
+  trevor: { sex: 'm', skin: 0xe0b898, iris: 0x4a3a2a, hair: 'balding', hairColor: 0x5a4a3a, top: 'tee', topColor: 0xc8c0a4, bottom: 'jeans', bottomColor: 0x3a4a5a, shoes: 'boot', shoeColor: 0x3a2a1a, height: 1.82, heavy: 1.04 },
+  // Lester: glasses, a cap, a cardigan
+  lester: { sex: 'm', skin: 0xe8c8a8, iris: 0x4a5a3a, hair: 'short', hairColor: 0x6a5a4a, glasses: true, hat: 'cap', hatColor: 0x3a4a3a, top: 'sweater', topColor: 0x5a6a4a, bottom: 'trousers', bottomColor: 0x8a7a5a, shoes: 'dress', shoeColor: 0x3a2a1a, height: 1.7 },
+  // Stretch: very tall, Ballas purple
+  stretch: { sex: 'm', skin: 0x4a3020, iris: 0x1a100a, hair: 'buzz', hairColor: 0x0e0a08, top: 'hoodie', topColor: 0x4a1a6a, bottom: 'jeans', bottomColor: 0x1a1c22, shoes: 'sneaker', shoeColor: 0x1a1a1a, height: 1.96 },
 };
 export const FRIEND_LOOKS = ['friend0', 'friend1', 'friend2', 'friend3'];
 

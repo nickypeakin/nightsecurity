@@ -113,7 +113,8 @@ export class Post {
   constructor(renderer) {
     this.renderer = renderer;
     this.grainOn = false;   // the camcorder look (Settings)
-    this.maxDpr = 1.5;     // high-density screens render at up to this many pixels per CSS pixel
+    this.maxDpr = 2;       // high-density screens render at up to this many pixels per CSS pixel
+    this.minRatio = 0;     // and never fewer than this
     this.bloomOn = true;
     const hdr = { type: THREE.HalfFloatType };
     this.target = new THREE.WebGLRenderTarget(4, 4, { ...hdr, samples: 2 });
@@ -141,8 +142,9 @@ export class Post {
 
   // How hard the picture works: pixel density cap, anti-aliasing samples
   // (0, 2 or 4) and bloom. Settings > Graphics picks these.
-  configure({ maxDpr, samples, bloom }) {
+  configure({ maxDpr, minRatio = 0, samples, bloom }) {
     this.maxDpr = maxDpr;
+    this.minRatio = minRatio;
     this.bloomOn = bloom;
     if (samples !== this.target.samples) {
       const { width, height } = this.target;
@@ -153,10 +155,12 @@ export class Post {
   }
 
   // Full resolution (capped on high-density screens) times `quality`,
-  // which drops on computers that can't keep up.
+  // which drops on computers that can't keep up (but not below minRatio
+  // pixels to a CSS pixel).
   setSize(w, h, quality = 1) {
     const dpr = window.devicePixelRatio || 1;
-    const scale = Math.min(dpr, this.maxDpr) * quality;
+    const full = Math.min(dpr, this.maxDpr);
+    const scale = Math.min(full, Math.max(this.minRatio || 0, full * quality));
     const rw = Math.max(2, Math.round(w * scale)), rh = Math.max(2, Math.round(h * scale));
     // the further below the screen's own resolution, the harder it sharpens
     this.u.sharpen.value = Math.min(1, 0.45 + Math.max(0, 1 - scale / dpr) * 1.4);

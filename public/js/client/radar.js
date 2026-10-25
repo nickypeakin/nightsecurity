@@ -17,7 +17,7 @@ const ISL = { x0: GRID.x0, z0: GRID.z0, w: (GRID.nx - 1) * GRID.cell, h: (GRID.n
 const SEA = '#16324a';
 
 const POIS = [
-  ['hospital', 'H', '#ff6a6a'], ['police', 'P', '#7aa8ff'], ['guns', '⌖', '#ffd06a'], ['spray', 'S', '#ff7ad8'], ['safehouse', '⌂', '#7aff9a'],
+  ['hospital', 'H', '#ff6a6a'], ['police', 'P', '#7aa8ff'], ['guns', '⌖', '#ffd06a'], ['spray', 'R', '#ff7ad8'], ['safehouse', '⌂', '#7aff9a'],
 ];
 const BLIP = { dest: '#ffd040', check: '#ff4040', check2: '#a04040', car: '#5ab0ff', enemy: '#ff4040', pickup: '#50e070', friend: '#5ab0ff' };
 

@@ -125,11 +125,13 @@ export class Match {
     this.emit({ t: 'bark', id: p.id, text: list[Math.floor(this.rng() * list.length)], x: r2(p.x), z: r2(p.z), cop: p.kind === 'cop' });
   }
   // lines of dialogue, one after another; returns how long they take
-  dialog(lines) {
-    let at = 0;
+  // lines of dialogue, one after another; `phone` for a call (`after`
+  // seconds from now, after the ring)
+  dialog(lines, { phone = false, after = 0 } = {}) {
+    let at = after;
     for (const [who, text] of lines) {
       const dur = 1.4 + text.length * 0.055;
-      this.emit({ t: 'say', who, text, dur, delay: at });
+      this.emit({ t: 'say', who, text, dur, delay: at, ...(phone ? { phone: true } : {}) });
       at += dur;
     }
     return at;

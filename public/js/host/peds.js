@@ -1,8 +1,9 @@
 // People on foot, run by the host: pedestrians walking the sidewalks (they
 // wait for the lights to cross, run from gunfire, get knocked flying by
 // cars and drop their cash), police officers (chase, arrest, shoot),
-// gang members (shoot), and your friends on a job (a getaway crew, Dre),
-// who go where they're told and get in where they're told.
+// gang members (shoot), and the people along on a job (a getaway crew,
+// Lamar, Michael, Trevor), who go where they're told and get in where
+// they're told.
 
 import { WALK_NODES, light, nodeAt, groundY } from '../shared/city.js';
 import { circleVsCar } from '../shared/collide.js';
@@ -11,7 +12,9 @@ import { BARKS } from '../shared/story.js';
 
 // pedestrian looks: the client has a body for each (0..PED_LOOKS-1)
 export const PED_LOOKS = 14;
-export const LOOK_COP = 100, LOOK_GANG = 101, LOOK_CREW = 102, LOOK_DRE = 103, LOOK_BOSS = 104, LOOK_VOSS = 105;
+export const LOOK_COP = 100, LOOK_GANG = 101, LOOK_CREW = 102, LOOK_BOSS = 104;
+// and the story's own people, by name
+export const LOOK_OF = { lamar: 103, stretch: 105, michael: 106, trevor: 107, lester: 108, simeon: 109 };
 
 // anim codes the client understands
 export const A = { idle: 0, walk: 1, run: 2, aim: 3, down: 4, dead: 5, hands: 6, punch: 7, still: 8, cower: 9 };

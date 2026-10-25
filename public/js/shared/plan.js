@@ -29,7 +29,7 @@ const MERGE = [[7, 0, 2, 2], [5, 3, 2, 1], [6, 6, 2, 1], [10, 7, 3, 1]];
 // what each letter is
 export const KINDS = {
   M: 'mansions', m: 'estate', B: 'beach', t: 'starlight', T: 'down', C: 'plaza', P: 'park', h: 'hospital', H: 'res', F: 'flats',
-  f: 'home', S: 'shops', r: 'strip', x: 'site', k: 'carlot', g: 'gas', o: 'police', W: 'mill', y: 'yard', v: 'voss', s: 'spray', D: 'docks',
+  f: 'home', S: 'shops', r: 'strip', x: 'site', k: 'carlot', g: 'gas', o: 'police', W: 'mill', y: 'yard', v: 'freight', s: 'spray', D: 'docks',
 };
 
 export const COLS = XS.length - 1, ROWS = ZS.length - 1;

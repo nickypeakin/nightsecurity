@@ -45,7 +45,7 @@
     <div id="shop" hidden></div>
     <div id="mapScreen" hidden>
       <canvas id="mapCanvas"></canvas>
-      <p class="legend"><span class="y">●</span> job · <span class="b">▲</span> your car · <span class="r">●</span> target · H hospital · P police · ⌖ guns · S Spray-N-Go · ⌂ your place</p>
+      <p class="legend"><span class="y">●</span> job · <span class="b">▲</span> your car · <span class="r">●</span> target · H hospital · P police · ⌖ guns · R Spray-N-Go (respray) · ⌂ your place</p>
       <p class="legend keys">Scroll or + / − to zoom · drag or arrows to move · M to close</p>
     </div>
   </div>
@@ -65,7 +65,7 @@
         </nav>
         <div class="mm-card" id="card-story">
           <h3>STORY MODE</h3>
-          <p>You're Zay, from the Flats: broke, a car that mostly runs, and a best friend, Dre, who's always one bad idea from trouble. Eight jobs for the people who run San Cielo, twenty hidden packages, and a whole island to get into trouble on.</p>
+          <p>You're Franklin, from the Flats, repossessing cars for a crooked dealer with your best friend Lamar. Then a job in Palm Ridge goes wrong and you meet Michael, Trevor and Lester. Nine jobs, twenty hidden packages, and a whole island to get into trouble on.</p>
           <button data-act="continue" id="continueBtn" class="opt" hidden>CONTINUE <small></small></button>
           <button data-act="solo" class="opt">NEW GAME <small>from the beginning</small></button>
         </div>
@@ -143,8 +143,8 @@
     <section id="help" class="screen" hidden>
       <h2 class="head">HOW TO PLAY</h2>
       <div class="text">
-        <p>You're Isaiah "Zay" Carter, from the Flats in <b>San Cielo</b>. Your best friend Dre has found the two of you some work, and it leads to some of the people who really run this city.</p>
-        <p><b>Jobs.</b> The big letters on the radar are the people with work: <b>D</b> is Dre (on your sofa at home), <b>O</b> Ray Okafor at his car lot, <b>V</b> Lena Voss at the Docks, <b>M</b> Vince Moreno in Palm Ridge. Go to their door, walk in, and step into the ring in front of them.</p>
+        <p>You're Franklin, from the Flats in <b>San Cielo</b>. You and your best friend Lamar repossess cars for Simeon, a dealer who isn't as honest as he says. One of those cars belongs to Michael, a retired bank robber, and he has other ideas for you.</p>
+        <p><b>Jobs.</b> When somebody has work, your phone rings and their letter shows up on the radar: <b>L</b> is Lamar (in your living room at home), <b>S</b> is Simeon at his car lot, <b>M</b> is Michael in Palm Ridge, and Lester (<b>L</b>, in purple) is at his warehouse at the Docks. Go to their door, walk in, and step into the ring in front of them.</p>
         <p><b>Buildings.</b> Walk into a glowing door to go inside: your place (sleep in your bed to save), <b>Freedom Arms</b> for guns and armour, <b>Sal's Diner</b> for a meal when you're hurt, and the offices of the people with work.</p>
         <p><b>The island.</b> San Cielo is on the south coast of an island: Pelican Beach and the airport to the west, the Starlight Hills, the desert, Lake Corrigan and Mount Harlow to the north. Press <b>M</b> for the map.</p>
         <p><b>Cars.</b> Your own car is parked by your place. Any other car is yours too if you press F next to it. <b>Stars</b> mean the police want you: get out of their sight until they give up, or drive into <b>Spray-N-Go</b>. Days pass, and the street lights come on at night.</p>
@@ -176,9 +176,9 @@
         <label class="check"><input type="checkbox" id="vhs"> Old camcorder look (VHS)</label>
         <label class="slider">GRAPHICS
           <select id="graphics">
-            <option value="auto">Auto (adjusts to your computer)</option>
-            <option value="high">High (fast computers)</option>
-            <option value="low">Low (older laptops)</option>
+            <option value="auto">Auto (sharp, adjusts to your computer)</option>
+            <option value="high">High (full resolution, fast computers)</option>
+            <option value="low">Low (older laptops, blurrier)</option>
           </select>
         </label>
       </div>

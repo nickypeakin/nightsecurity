@@ -20,7 +20,7 @@ import { Fx, makeMarker, makePickup } from './fx.js';
 import { Radar } from './radar.js';
 import { sound } from './audio.js';
 import { voice } from './voice.js';
-import { PED_LOOKS, LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS } from '../host/peds.js';
+import { PED_LOOKS, LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_OF } from '../host/peds.js';
 
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
@@ -87,7 +87,7 @@ export class Game {
     this.p = { x: S.x - (this.myIdx % 2) * 1.1, z: S.z + Math.floor(this.myIdx / 2) * 1.1, y: 0, vy: 0, h: S.h, speed: 0, anim: 0, kx: 0, kz: 0, downT: 0 };
     this.room = null;           // the room you're in (null: outdoors)
     this.opening = new Opening(this);
-    this.tutorial = null;       // (after the opening: go and see Dre)
+    this.tutorial = null;       // (after the opening: go and see Lamar)
     this.doorArmed = true;      // (false just after a door, until you step off it)
     this.doorT = 0;
     this.camYaw = 0;
@@ -175,7 +175,7 @@ export class Game {
   // build every body and car once now, so nobody's first appearance stalls
   prewarm() {
     const g = new THREE.Group();
-    const looks = [...Array(PED_LOOKS).keys(), LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, LOOK_DRE, LOOK_VOSS];
+    const looks = [...Array(PED_LOOKS).keys(), LOOK_COP, LOOK_GANG, LOOK_CREW, LOOK_BOSS, ...Object.values(LOOK_OF)];
     for (const l of looks) template(l);
     for (const k of PLAYER_LOOKS) template(k, { lite: false });
     const v = new PersonView(g, 0);
@@ -291,8 +291,8 @@ export class Game {
     }
     for (const [k, m2] of this.markers) if (!want.has(k) && !k.startsWith('fixed:')) { m2.removeFromParent(); this.markers.delete(k); }
     for (const [k, [kind, x, z, r]] of want) if (!this.markers.has(k)) this.addMarker(k, x, z, kind, r, false);
-    // the people with jobs, always in their offices (Dre's on your sofa,
-    // unless he's out on a job)
+    // the people with jobs, always in their offices (Lamar's in your living
+    // room, unless he's out on a job)
     for (const key of Object.keys(PEOPLE)) {
       const show = !!INTERIOR[GIVER_ROOMS[key]];
       const v = this.givers.get(key);
@@ -314,10 +314,10 @@ export class Game {
 
   onSay(m) {
     const go = () => {
-      const radio = m.radio;
+      const radio = m.radio, phone = m.phone;
       const name = NAMES[m.who] || m.who;
-      if (!radio) { this.talking = m.who; this.talkUntil = performance.now() / 1000 + (m.dur || 4); this.cutLine = (this.cutLine || 0) + 1; }
-      this.hud.say(name, m.text, radio ? 'radio' : 'talk', m.dur || 4);
+      if (!radio && !phone) { this.talking = m.who; this.talkUntil = performance.now() / 1000 + (m.dur || 4); this.cutLine = (this.cutLine || 0) + 1; }
+      this.hud.say(name, m.text, radio ? 'radio' : phone ? 'phone' : 'talk', m.dur || 4);
       if (radio) sound.radio();
       voice.say(m.text, radio ? 'radio' : m.who, { salt: m.who?.length || 0 });
     };
@@ -366,6 +366,7 @@ export class Game {
       case 'grab': if (m.id === me) { sound.crash(null, 0.3); this.shake = 1; } break;
       case 'missionStart': case 'passed': case 'failed': break;
       case 'checkpoint': sound.jingle('checkpoint'); break;
+      case 'ring': sound.ring(); break;
       default:
     }
   }
@@ -420,16 +421,16 @@ export class Game {
     if (this.opening.t > 1 && !this.mission.active) this.tutorial = 'talk';
   }
 
-  // the first minute: go and see Dre, in the living room
+  // the first minute: go and see Lamar, in the living room
   tutorialText() {
     const T = this.tutorial;
     if (!T) return null;
     if (this.mission.active) { this.tutorial = null; return null; }
-    return this.room === 'home' ? "~b~Dre~w~'s in the living room. Walk into the ring in front of him to start." : 'Go home: ~b~Dre~w~ is waiting (~g~D~w~ on the radar).';
+    return this.room === 'home' ? "~b~Lamar~w~'s in the living room. Walk into the ring in front of him to start." : 'Go home: ~b~Lamar~w~ is waiting (~g~L~w~ on the radar).';
   }
 
   credits() {
-    const lines = [['GTA 7', 'The End'], ['Thanks for playing', `San Cielo is still yours. Find all ${PACKAGES.length} hidden packages.`]];
+    const lines = [['GTA 7', 'The End'], ['Franklin, Lamar, Michael, Trevor and Lester', 'will be back.'], ['Thanks for playing', `San Cielo is still yours. Find all ${PACKAGES.length} hidden packages.`]];
     lines.forEach(([a, b], i) => setTimeout(() => this.hud.banner(a, b, 'credits'), 5000 + i * 4500));
   }
 
@@ -831,7 +832,8 @@ export class Game {
     // job givers, and the people behind the counters, in their rooms
     const talking = this.talking && performance.now() / 1000 < this.talkUntil ? this.talking : null;
     for (const [key, g] of this.givers) {
-      g.root.visible = this.room === GIVER_ROOMS[key] && !(key === 'dre' && this.mission.active && !this.mission.cut);
+      // (not while they're out on the job with you)
+      g.root.visible = this.room === GIVER_ROOMS[key] && !((key === 'lamar' || key === 'michael') && this.mission.active && !this.mission.cut);
       if (g.root.visible) g.update(dt, { y: groundY(g.x, g.z), pose: talking === key ? 'talk' : null });
     }
     for (const v of this.clerks) { v.root.visible = this.room === v.room; if (v.root.visible) v.update(dt, { y: groundY(v.x, v.z) }); }

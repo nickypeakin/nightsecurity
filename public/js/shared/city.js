@@ -237,7 +237,7 @@ function district(kind, x, z) {
     case 'carlot': case 'gas': return 'Eastgate';
     case 'mill': return x > 240 && z > 0 ? 'The Docks' : 'Mill End';
     case 'yard': case 'spray': return 'Mill End';
-    case 'voss': case 'docks': return 'The Docks';
+    case 'freight': case 'docks': return 'The Docks';
     default: return 'San Cielo';
   }
 }
@@ -394,8 +394,8 @@ function mansions(b, { estate = false } = {}) {
   GROUNDS.push({ x0: b.x0, x1: b.x1, z0: b.z0, z1: b.z1, kind: 'grass' });
   const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
   if (estate) {
-    const m = building(cx - 16, cx + 16, b.z1 - 30, b.z1 - 8, 10, 'house', { roof: 'flat', villa: true, tint: 5, face: 's', name: 'Moreno Estate' });
-    PLACES.vince = { x: cx, z: b.z1 + 2, h: 0, name: 'Moreno Estate' };
+    const m = building(cx - 16, cx + 16, b.z1 - 30, b.z1 - 8, 10, 'house', { roof: 'flat', villa: true, tint: 5, face: 's', name: 'De Santa House' });
+    PLACES.michael = { x: cx, z: b.z1 + 2, h: 0, name: "Michael's house" };
     prop('pool', cx, b.z0 + 14, 0, { w: 14, d: 7 });
     for (const s of [-1, 1]) { prop('palm', cx + s * 20, b.z1 - 4, 0); prop('palm', cx + s * 22, b.z0 + 6, 0); }
     park(cx + 22, b.z1 - 14, 0, 'drive', 'sports');
@@ -518,9 +518,9 @@ function build() {
       }
       case 'carlot': {
         GROUNDS.push({ x0: b.x0, x1: b.x1, z0: b.z0, z1: b.z1, kind: 'asphalt' });
-        building(b.x0 + 4, b.x0 + 18, b.z0 + 4, b.z0 + 12, 4.2, 'office', { name: "Okafor's Motors", face: 'n', low: true });
-        PLACES.okafor = { x: b.x0 + 11, z: b.z0 - 2, h: Math.PI, name: "Okafor's Motors" };
-        PLACES.lot = { x: b.x0 + 11, z: b.z0 + 22, name: "Okafor's lot" };
+        building(b.x0 + 4, b.x0 + 18, b.z0 + 4, b.z0 + 12, 4.2, 'office', { name: "Simeon's Motors", face: 'n', low: true });
+        PLACES.simeon = { x: b.x0 + 11, z: b.z0 - 2, h: Math.PI, name: "Simeon's Motors" };
+        PLACES.lot = { x: b.x0 + 11, z: b.z0 + 22, name: "Simeon's lot" };
         for (let r = 0; r < 3; r++) for (let k = 0; k < 7; k++) {
           if (rng.chance(0.15)) continue;
           park(b.x0 + 26 + k * 5.2, b.z0 + 8 + r * 12, Math.PI, 'sale', rng.pick(['sedan', 'sports', 'pickup', 'sedan', 'sports']));
@@ -552,9 +552,9 @@ function build() {
         PLACES.spray = { x: cx, z: z0 + 8, x0: x0 + 1, x1: x1 - 1, z0: z0 + 2, z1: z1 - 1, name: 'Spray-N-Go' };
         break;
       }
-      case 'voss':
-        warehouses(b, { name: 'VOSS FREIGHT' });
-        PLACES.voss = { x: b.x0 + 16, z: b.z0 + 28, h: Math.PI, name: 'Voss Freight' };
+      case 'freight':
+        warehouses(b, { name: 'CREST STORAGE' });
+        PLACES.lester = { x: b.x0 + 16, z: b.z0 + 28, h: Math.PI, name: "Lester's warehouse" };
         break;
       case 'yard':
         warehouses(b);

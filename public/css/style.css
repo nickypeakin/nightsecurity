@@ -228,6 +228,9 @@ select { font: 400 14px var(--ui); color: var(--ink); background: rgba(0, 0, 0, 
 #subs div.radio { font-family: var(--vt); font-size: 24px; color: #9ae08a; }
 #subs div.radio b { color: #5ab0ff; }
 #subs div.bark { font-style: italic; font-size: 16px; color: #d8dce0; }
+#subs div.phone { color: #e8f2ff; }
+#subs div.phone b { color: #7ad0ff; }
+#subs div.phone b::before { content: '\260E  '; color: #7ad0ff; }
 @keyframes sub { from { opacity: 0; } to { opacity: 1; } }
 
 /* MISSION PASSED / WASTED / BUSTED */
